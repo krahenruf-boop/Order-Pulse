@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+*.sqlite3*
+credentials.json
+.runtime/
+# Never retain raw TMS export files in this project.
+*.xls
+*.xlsx
+
+
+# Local runtime data and verification evidence are not source code.
+artifacts/
+backups/
+logs/
+*.db
+*.db-*
+.env.*
+!.env.example

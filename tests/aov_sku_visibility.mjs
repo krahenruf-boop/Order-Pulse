@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {aovVisibleProducts} from '../static/aov-monitor.js';
+const metric={current_count:12,aov_rmb:'51.47'};
+const card={windows:{'24h':metric},products:[{family_id:'p',observed_skus:['A','B'],windows:{'24h':metric}},{family_id:'unknown',observed_skus:['U'],unknown:true}],hidden_skus:['A']};
+const original=structuredClone(card);
+assert.deepEqual(aovVisibleProducts(card)[0].visible_skus,['B']);
+assert.equal(aovVisibleProducts(card)[0].windows['24h'],metric,'display-only hiding preserves product metrics');
+assert.equal(card.windows['24h'].current_count,12,'shop totals unchanged');
+assert.deepEqual(card,original,'render does not mutate stored source data');
+assert.deepEqual(aovVisibleProducts({...card,hidden_skus:['A','B']}).map(p=>p.family_id),['unknown'],'all hidden members hide the row');
+assert.equal(aovVisibleProducts({...card,hidden_skus:[]}).length,2,'restore shows rows');
+assert.equal(aovVisibleProducts({...card,hidden_skus:['U']}).length,1,'unknown SKU supports hiding');
+console.log('PASS: partial/all hidden, unknown SKU, restore, unchanged metrics and source snapshot');
