@@ -243,7 +243,7 @@ const isLinkmeTab=tab=>{
 };
 
 const MARKER='ORDER_PULSE_BALANCE:';
-let result;
+let result,claimedTask,claimedIdentity;
 try {
   const spec=INPUT;
   const spaces=await listTaskSpaces();
@@ -256,7 +256,7 @@ try {
     let task,takeover=false;
     if(entry.ownership==='agent') task=await taskSpace(entry.id);
     else if(['user','agentDelegatedToUser'].includes(entry.ownership)&&spec.auto_takeover===true) {
-      try { task=entry.ownership==='agentDelegatedToUser'?await takeOverTaskSpace(entry.id):await claimTaskSpace(entry.id);takeover=true; }
+      try { task=entry.ownership==='agentDelegatedToUser'?await takeOverTaskSpace(entry.id):await claimTaskSpace(entry.id);takeover=true;if(task.spaceId===entry.id){claimedTask=task;claimedIdentity=entry;} }
       catch { result={ok:false,error_code:'WAITING_BROWSER',error:'专用浏览器暂不可接管'}; }
     } else result={ok:false,error_code:'WAITING_USER',error:'专用浏览器当前由用户操作'};
     if(result) {/* preserve the bounded takeover failure */}
@@ -279,5 +279,12 @@ try {
 } catch(error) {
   const code=['WAITING_USER','WAITING_CONNECTION','WAITING_BROWSER','BOUND_SPACE_MISSING'].includes(error?.message)?error.message:'BALANCE_BROWSER_FAILED';
   result={ok:false,error_code:code,error:code==='WAITING_USER'?'专用浏览器当前由用户操作':code==='WAITING_BROWSER'?'专用浏览器暂不可接管':'ego lite 余额读取未完成'};
+} finally {
+  if(claimedTask) {
+    try {
+      const e=(await listTaskSpaces()).find(e=>e.id===claimedIdentity.id&&e.name===claimedIdentity.name&&e.profileId===claimedIdentity.profileId&&e.profileName===claimedIdentity.profileName);
+      if(e?.ownership==='agent')await claimedTask.handOff();
+    } catch {if(result)result.control_release_pending=true;}
+  }
 }
 console.log(MARKER+JSON.stringify(result));

@@ -20,6 +20,10 @@ def create_router(monitor):
         return await monitor.start(shop_ids=body.get('shop_ids'),retry_id=body.get('retry_id'))
     @router.get('/history')
     async def history():return {'runs':monitor.store.history(),'notifications':monitor.store.events()}
+    @router.post('/resume',status_code=202)
+    async def resume(request:Request):
+        if await request.json()!={}:raise ValueError('恢复请求无效')
+        return await monitor.resume()
     @router.get('/history/{rid}')
     async def detail(rid:str):
         result=monitor.store.snapshot(rid)

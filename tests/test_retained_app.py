@@ -17,24 +17,29 @@ class RetainedAppTests(unittest.TestCase):
    captured.append(kw['input'])
    return SimpleNamespace(returncode=0,stdout='AOV_BINDING:{"space_id":11,"page_label":"p3"}',stderr='')
   real_run=subprocess.run
-  for ownership,allowed,profile,expected,calls in [
-   ('agent',True,'Default',{'space_id':11,'page_label':'p3'},['resume']),
-   ('user',True,'Default',{'space_id':11,'page_label':'p3'},['claim']),
-   ('agentDelegatedToUser',True,'Default',{'space_id':11,'page_label':'p3'},['takeover']),
-   ('user',False,'Default',{'error':'WAITING_USER'},[]),
-   ('user',True,'different',{'error':'BROWSER_BINDING_REQUIRED'},[]),
+  for ownership,active,allowed,profile,expected,calls in [
+   ('user',False,True,'Default',{'error':'WAITING_USER'},[]),
+   ('agentDelegatedToUser',False,True,'Default',{'error':'WAITING_USER'},[]),
+   ('agent',True,True,'Default',{'space_id':11,'page_label':'p3'},['resume']),
+   ('user',True,True,'Default',{'space_id':11,'page_label':'p3'},['claim']),
+   ('agentDelegatedToUser',True,True,'Default',{'space_id':11,'page_label':'p3'},['takeover']),
+   ('user',True,False,'Default',{'error':'WAITING_USER'},[]),
+   ('user',True,True,'different',{'error':'BROWSER_BINDING_REQUIRED'},[]),
   ]:
    with self.subTest(ownership=ownership,allowed=allowed,profile=profile):
-    with patch('order_pulse.aov_monitor.sources.subprocess.run',side_effect=capture):DualSource(None).resolve({**binding,'auto_takeover':allowed})
+    source=DualSource(None)
+    with patch('order_pulse.aov_monitor.sources.subprocess.run',side_effect=capture):
+     if active:source.run_browser_task(source.resolve,{**binding,'auto_takeover':allowed})
+     else:source.resolve({**binding,'auto_takeover':allowed})
     entry=dict(id=11,name=binding['expected_name'],profileId=profile,profileName='昊',ownership=ownership)
     harness='const calls=[];const listTaskSpaces=async()=>['+json.dumps(entry)+'''];
-const task={tabs:async()=>[{label:'p3',url:'https://tms.mabangerp.com/#/myorderlist'}],page:label=>({label})};
+const task={spaceId:11,tabs:async()=>[{label:'p3',url:'https://tms.mabangerp.com/#/myorderlist'}],page:label=>({label})};
 const taskSpace=async()=>{calls.push('resume');return task};
 const claimTaskSpace=async()=>{calls.push('claim');return task};
 const takeOverTaskSpace=async()=>{calls.push('takeover');return task};
 '''
     p=real_run(['node','--input-type=module'],input=harness+captured[-1]+"\nconsole.log(JSON.stringify(calls));",text=True,capture_output=True,check=True)
-    lines=p.stdout.splitlines()
+    lines=[line for line in p.stdout.splitlines() if not line.startswith('AOV_CONTROL:')]
     self.assertEqual(json.loads(lines[0].removeprefix('AOV_BINDING:')),expected)
     self.assertEqual(json.loads(lines[1]),calls)
  def test_removed_routes_and_tables_stay_absent(self):

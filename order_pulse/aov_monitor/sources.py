@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import subprocess
 import time
+import threading
 from .domain import instant, number
 from ..tms_orders import EgoOrderTransport, _validate_partition
 from ..tms_core.source_time import request_window
@@ -72,24 +73,39 @@ def normalize_miaoshou(raw, refunds=None):
         payment_status=payment(raw['status']),refund_status=refund,skus=raw['skus'])
 
 class DualSource:
-    def __init__(self,host):self.host=host;self.real_verified=False
+    def __init__(self,host):self.host=host;self.real_verified=False;self._control=threading.local()
+    def run_browser_task(self,fn,*args):
+        """Only real work may acquire control; release our claim on every exit."""
+        self._control.active=True
+        try:return fn(*args)
+        finally:
+            self._control.active=False
+            claimed=getattr(self._control,'claimed',None)
+            self._control.claimed=None
+            if claimed:
+                from ..integrations.ego_runtime import execute
+                execute(Path(__file__).parents[1]/'integrations/ego_handoff.js',claimed,'ORDER_PULSE_HANDOFF:',timeout=15)
+    def _remember_claim(self,output,shared):
+        if isinstance(output,bytes):output=output.decode('utf-8',errors='replace')
+        if 'AOV_CONTROL:claimed' in (output or '').splitlines():self._control.claimed=dict(shared)
     def status(self):
         contract=self.host.repo.get('aov_source_verification') or {}
         return dict(verified=contract.get('verified') is True,
             note=contract.get('note') or '待完成双来源金额、时区及退款覆盖核验；自动监控暂不可启用。',
             checked_at=contract.get('checked_at'),details=contract.get('details',[]))
     def resolve(self,shared):
-        script='const s='+json.dumps(shared)+''';
+        script='const s='+json.dumps(dict(shared,task_active=getattr(self._control,'active',False)))+''';
 const entries=await listTaskSpaces();const e=entries.find(e=>e.id===s.space_id&&e.name===s.expected_name&&e.profileId===s.profile_id&&e.profileName===s.profile_name);
 let result;
 if(!e)result={error:'BROWSER_BINDING_REQUIRED'};
 else {
  let task;
  if(e.ownership==='agent')task=await taskSpace(e.id);
- else if(s.auto_takeover===true&&['user','agentDelegatedToUser'].includes(e.ownership)) {
-  try { task=e.ownership==='agentDelegatedToUser'?await takeOverTaskSpace(e.id):await claimTaskSpace(e.id); }
+ else if(s.task_active===true&&s.auto_takeover===true&&['user','agentDelegatedToUser'].includes(e.ownership)) {
+  try { task=e.ownership==='agentDelegatedToUser'?await takeOverTaskSpace(e.id):await claimTaskSpace(e.id);if(task.spaceId===e.id)console.log('AOV_CONTROL:claimed'); }
   catch { result={error:'WAITING_USER'}; }
  } else result={error:'WAITING_USER'};
+ if(!result&&task.spaceId!==e.id)result={error:'BROWSER_BINDING_REQUIRED'};
  if(!result) {
  const all=await task.tabs(),tabs=all.filter(t=>t.url.startsWith('https://tms.mabangerp.com/#/myorder'));
  if(tabs.length!==1)result={error:all.some(t=>t.url.startsWith('https://tms.mabangerp.com/#/login'))?'AUTH_REQUIRED':'TMS_PAGE_REQUIRED'};
@@ -99,7 +115,10 @@ else {
 console.log('AOV_BINDING:'+JSON.stringify(result));
 '''
         try:p=subprocess.run([str(Path.home()/'.local/bin/ego-browser'),'nodejs'],input=script,text=True,capture_output=True,timeout=15)
-        except subprocess.TimeoutExpired:raise ValueError('WAITING_CONNECTION') from None
+        except subprocess.TimeoutExpired as exc:
+            self._remember_claim(exc.stdout,shared)
+            raise ValueError('WAITING_CONNECTION') from None
+        self._remember_claim(p.stdout,shared)
         lines=[x[len('AOV_BINDING:'):] for x in (p.stdout+'\n'+p.stderr).splitlines() if x.startswith('AOV_BINDING:')]
         if p.returncode or len(lines)!=1:
             raise ValueError('WAITING_CONNECTION')

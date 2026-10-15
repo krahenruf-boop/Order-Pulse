@@ -64,11 +64,20 @@ class Monitor:
             c=self.store.prepare(self.shops());hours=cycle_hours(c) if is_cycle(c) or is_incremental(c) else 2
             if self.store.skip_unstarted(*pending,slot_at(self.clock(),hours)):
                 if self.store.config()['enabled']:await self.start(True)
-            else:
+            elif pending[1].get('phase') not in {'WAITING_USER','AUTH_REQUIRED','WAITING_CONNECTION','BROWSER_BINDING_REQUIRED','TMS_PAGE_REQUIRED'}:
                 context=self.store.narrow_run(*pending)
                 if context.get('collection_mode')=='CYCLE' and context.get('directory') and instant(context['cutoff'])<slot_at(self.clock(),hours):context.update(finalize_only=True,halt_error='CYCLE_EXPIRED')
                 self.worker=asyncio.create_task(run_cards(self,pending[0],context))
         self.timer=asyncio.create_task(self.scheduler())
+    async def resume(self):
+        """An explicit click resumes the saved task without creating a duplicate."""
+        if self.worker and not self.worker.done():raise ValueError('检测正在运行')
+        pending=self.store.pending()
+        if not pending or not pending[1].get('card_run'):raise ValueError('没有等待恢复的检测任务')
+        from .card_service import run_cards
+        context=self.store.narrow_run(*pending)
+        self.worker=asyncio.create_task(run_cards(self,pending[0],context))
+        return dict(run_id=pending[0],status='RUNNING')
     async def shutdown(self):
         self.stopping=True
         if self.timer:self.timer.cancel();await asyncio.gather(self.timer,return_exceptions=True)
@@ -124,6 +133,17 @@ class Monitor:
         rid=self.store.start(slot,dict(trigger='automatic' if automatic else 'manual',revision=c['revision']))
         if not rid:return None
         self.worker=asyncio.create_task(self.run(rid,c,at,slot));return {'run_id':rid,'status':'RUNNING'}
+    def scheduler_delay(self):
+        # Fast retries belong only to an unfinished task waiting for TMS.
+        # Idle / user-login waits sleep until the next configured collection slot.
+        pending=self.store.pending()
+        if self.worker and not self.worker.done() or pending and pending[1].get('phase') in {'TMS_PAGE_REQUIRED','WAITING_CONNECTION'}:
+            return 20
+        c=self.store.config()
+        if not c['enabled']:return 2*60*60
+        hours=cycle_hours(c) if is_cycle(c) or is_incremental(c) else 2
+        now=self.clock()
+        return max(1,(slot_at(now,hours)+timedelta(hours=hours)-now).total_seconds())
     async def scheduler(self):
         while not self.stopping:
             pending=self.store.pending()
@@ -131,24 +151,24 @@ class Monitor:
                 c=self.store.config();hours=cycle_hours(c) if is_cycle(c) or is_incremental(c) else 2
                 if self.store.skip_unstarted(*pending,slot_at(self.clock(),hours)):
                     if c['enabled']:await self.start(True)
-                    await asyncio.sleep(20);continue
+                    await asyncio.sleep(self.scheduler_delay());continue
                 if pending[1].get('collection_mode')=='CYCLE' and pending[1].get('directory') and instant(pending[1]['cutoff'])<slot_at(self.clock(),hours):
                     from .card_service import run_cards
                     pending[1].update(finalize_only=True,halt_error='CYCLE_EXPIRED')
                     self.worker=asyncio.create_task(run_cards(self,*pending))
-                    await asyncio.sleep(20);continue
+                    await asyncio.sleep(self.scheduler_delay());continue
                 from ..browser import blocking
                 readiness=await blocking(self.source.readiness) if hasattr(self.source,'readiness') else {'ready':await blocking(self.source.available),'error':'WAITING_USER'}
                 if readiness['ready']:
                     c=self.store.config();hours=cycle_hours(c) if is_cycle(c) or is_incremental(c) else 2
                     if self.store.skip_unstarted(*pending,slot_at(self.clock(),hours)):
                         if self.store.config()['enabled']:await self.start(True)
-                        await asyncio.sleep(20);continue
+                        await asyncio.sleep(self.scheduler_delay());continue
                     pending[1].pop('waiting_since',None);pending[1].pop('wait_error',None)
                     from .card_service import run_cards
                     self.worker=asyncio.create_task(run_cards(self,*pending))
                 else:self.store.pause(*pending,readiness['error'])
-                await asyncio.sleep(20);continue
+                await asyncio.sleep(self.scheduler_delay());continue
             if self.store.config()['enabled'] and (not hasattr(self.source,'directory') or self.store.directory().get('status')=='COMPLETE') and not (self.worker and not self.worker.done()):
                 try:
                     # A completed full manual refresh can be newer than the
@@ -156,7 +176,7 @@ class Monitor:
                     # than moving the dashboard backwards after restart.
                     if not self.current_slot_covered():await self.start(True)
                 except Exception:pass  # Failed runs remain visible; next slot may retry.
-            await asyncio.sleep(20)
+            await asyncio.sleep(self.scheduler_delay())
     def current_slot_covered(self):
         c=self.store.config();latest=self.store.snapshot() or {};context=latest.get('resume_context') or {}
         if not is_incremental(c) or latest.get('status')!='SUCCEEDED' or not is_incremental(latest) or context.get('shop_ids'):return False
@@ -172,7 +192,8 @@ class Monitor:
                     if p['family_id'] not in catalog or sorted(catalog[p['family_id']]['member_skus'])!=p['skus']:raise ValueError('CATALOG_CHANGED')
             if self.host.lock.locked():raise ValueError('BROWSER_BUSY')
             async with self.host.lock:
-                sources=await blocking(self.source.collect,c,start,cutoff)
+                runner=getattr(self.source,'run_browser_task',None)
+                sources=await blocking(runner,self.source.collect,c,start,cutoff) if runner else await blocking(self.source.collect,c,start,cutoff)
             saved_orders={}
             currencies={s['currency'] for s in c['shops'] if s['monitor'] and all(sources.get(s['id'],{}).get(k,{}).get('coverage')=='COMPLETE' for k in ('tms','miaoshou'))}
             fx={k:await blocking(self.rates.get,k,at) for k in sorted(currencies)}

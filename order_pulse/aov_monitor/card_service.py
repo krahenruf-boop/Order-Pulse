@@ -107,7 +107,9 @@ async def browser_batch(monitor,fn,*args):
     while monitor.host.lock.locked():
         if monitor.stopping:raise asyncio.CancelledError
         await asyncio.sleep(.5)
-    async with monitor.host.lock:return await blocking(fn,*args)
+    async with monitor.host.lock:
+        runner=getattr(monitor.source,'run_browser_task',None)
+        return await blocking(runner,fn,*args) if runner else await blocking(fn,*args)
 
 async def run_cards(monitor,rid,context):
     store=monitor.store;states=store.alert_states();at=instant(context['cutoff']);slot=context.get('slot');events=[]

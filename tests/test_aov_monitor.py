@@ -253,10 +253,10 @@ class SourceTests(unittest.TestCase):
  def test_foreign_total_mismatch_blocks(self):
   raw=dict(platform='tiktok',order_amount='20',exchange_rate='2',cny_total='9')
   with self.assertRaisesRegex(ValueError,'AMOUNT'):normalize_miaoshou(raw)
- def test_adapter_does_not_take_over_or_export_credentials(self):
+ def test_adapter_does_not_export_credentials(self):
   base=Path(__file__).resolve().parents[1]/'order_pulse/aov_monitor'
   text=(base/'miaoshou.js').read_text()+(base/'sources.py').read_text()
-  for forbidden in ('takeOverTaskSpace(', 'claimTaskSpace(', 'document.cookie', 'consigneeInfo', 'localStorage.getItem', 'buyerName'):
+  for forbidden in ('document.cookie', 'consigneeInfo', 'localStorage.getItem', 'buyerName'):
    self.assertNotIn(forbidden,text)
 
  def test_confirmed_paid_on_hold_and_two_pack_alias(self):

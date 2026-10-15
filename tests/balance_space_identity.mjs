@@ -6,11 +6,11 @@ const tail=source.slice(source.indexOf('function resolveBoundBalanceSpace'));
 const name='Order Pulse · Balance + Kalodata';
 const spec={space_id:1,space_name:name,expected_profile_id:'Default',expected_profile_name:'昊',purpose:'balance_kalodata',auto_takeover:true,page_label:'p1',job:{action:'inspect'}};
 const dedicated=(id,more={})=>({id,name,profileId:'Default',profileName:'昊',taskId:name,ownership:'agent',...more});
-async function run(spaces,{input=spec,tabs,returnedId}={}){
+async function run(spaces,{input=spec,tabs,returnedId,fail=false}={}){
  const calls=[],evaluated=[];let result;
- const link={url:'https://tt.linkme.live/client/dashboard',page:{label:'p2',evaluate:async()=>{evaluated.push('linkme');return {ok:true};}}};
- const task={spaceId:returnedId??spaces.find(x=>x.name===name)?.id,tabs:async()=>tabs??[link],adopt:async(page,options)=>{calls.push(['adopt',options]);return page;}};
- const env={INPUT:input,URL,runJsonPageJob:()=>{},listTaskSpaces:async()=>spaces,taskSpace:async id=>{calls.push(['resume',id]);return task;},claimTaskSpace:async id=>{calls.push(['claim',id]);return task;},takeOverTaskSpace:async id=>{calls.push(['takeOver',id]);return task;},console:{log:s=>{result=JSON.parse(s.split('ORDER_PULSE_BALANCE:')[1]);}}};
+ const link={url:'https://tt.linkme.live/client/dashboard',page:{label:'p2',evaluate:async()=>{evaluated.push('linkme');if(fail)throw Error('page failed');return {ok:true};}}};
+ const task={spaceId:returnedId??spaces.find(x=>x.name===name)?.id,tabs:async()=>tabs??[link],handOff:async()=>{calls.push(['handOff']);},adopt:async(page,options)=>{calls.push(['adopt',options]);return page;}};
+ const env={INPUT:input,URL,runJsonPageJob:()=>{},listTaskSpaces:async()=>spaces,taskSpace:async id=>{calls.push(['resume',id]);return task;},claimTaskSpace:async id=>{calls.push(['claim',id]);spaces.find(s=>s.id===id).ownership='agent';return task;},takeOverTaskSpace:async id=>{calls.push(['takeOver',id]);spaces.find(s=>s.id===id).ownership='agent';return task;},console:{log:s=>{result=JSON.parse(s.split('ORDER_PULSE_BALANCE:')[1]);}}};
  await vm.runInNewContext('(async()=>{'+tail+'})()',env);
  return {result,calls,evaluated};
 }
@@ -29,3 +29,13 @@ const rightTab={url:'https://tt.linkme.live/client/dashboard',page:{label:'p3',e
 r=await run([dedicated(0)],{tabs:[wrongTab,rightTab]});assert.equal(r.result.ok,true);assert.equal(wrong,0);assert.equal(right,1);assert.equal(r.result.browser.page_label,'p3');assert.deepEqual(JSON.parse(JSON.stringify(r.calls[1])),['adopt',{}]);
 r=await run([dedicated(0)],{tabs:[wrongTab,rightTab,{...rightTab}]});assert.equal(r.result.ok,false);assert.equal(right,1);
 console.log('PASS: zero/renumbered IDs, unrelated/ambiguous/profile protections, user control, returned identity, stale labels, ambiguous tabs');
+
+for(const ownership of ['user','agentDelegatedToUser']) {
+ for(const fail of [false,true]) {
+  r=await run([dedicated(0,{ownership})],{fail});
+  assert.equal(r.result.ok,!fail);
+  assert.deepEqual(r.calls.at(-1),['handOff']);
+ }
+}
+r=await run([dedicated(0)]);assert.equal(r.calls.some(c=>c[0]==='handOff'),false,'keep existing Codex control');
+console.log('PASS: own task claims released on success/failure; external Codex control preserved');
