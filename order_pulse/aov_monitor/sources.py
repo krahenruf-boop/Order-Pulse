@@ -75,16 +75,12 @@ def normalize_miaoshou(raw, refunds=None):
 class DualSource:
     def __init__(self,host):self.host=host;self.real_verified=False;self._control=threading.local()
     def run_browser_task(self,fn,*args):
-        """Only real work may acquire control; release our claim on every exit."""
+        """Real work may reclaim immediately; retain normal Agent control afterward."""
         self._control.active=True
         try:return fn(*args)
         finally:
             self._control.active=False
-            claimed=getattr(self._control,'claimed',None)
             self._control.claimed=None
-            if claimed:
-                from ..integrations.ego_runtime import execute
-                execute(Path(__file__).parents[1]/'integrations/ego_handoff.js',claimed,'ORDER_PULSE_HANDOFF:',timeout=15)
     def _remember_claim(self,output,shared):
         if isinstance(output,bytes):output=output.decode('utf-8',errors='replace')
         if 'AOV_CONTROL:claimed' in (output or '').splitlines():self._control.claimed=dict(shared)

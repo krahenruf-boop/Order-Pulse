@@ -51,7 +51,7 @@ export function aovRefundSummary(sample){
  return `退款影响估算：样本 ${sample.sample_shops} 家店、${sample.sample_orders} 单，全额退款占比 ${sample.order_pct}%，金额影响约 ${sample.amount_pct}%，客单价影响约 ${sample.aov_impact_pct}%。${sample.reused?'本轮复用样本，未读取退款页面。':'退款样本已更新。'}样本每24小时更新；并非随机抽样，估计不代表全店实际退款率。`;
 }
 export function aovSyncProgress(p){
- const waits={WAITING_USER:'浏览器已交还，准备好后点击“继续检测”',AUTH_REQUIRED:'马帮登录已过期，请完成登录并打开订单列表',TMS_PAGE_REQUIRED:'请在指定空间打开马帮订单列表',BROWSER_BINDING_REQUIRED:'浏览器空间绑定待核验',WAITING_CONNECTION:'浏览器连接暂不可用'};
+ const waits={WAITING_USER:'浏览器正由你操作；空闲满 5 分钟后接回，也可点击“继续检测”立即接回',AUTH_REQUIRED:'马帮登录已过期，请完成登录并打开订单列表',TMS_PAGE_REQUIRED:'请在指定空间打开马帮订单列表',BROWSER_BINDING_REQUIRED:'浏览器空间绑定待核验',WAITING_CONNECTION:'浏览器连接暂不可用'};
  if(waits[p.phase])return `${waits[p.phase]}；本轮已暂停，保留已完成数据。${p.waiting_since?'等待自 '+time(p.waiting_since)+'。':''}`;
  const minutes=Math.floor((p.collection_seconds||0)/60),seconds=(p.collection_seconds||0)%60;
  return `正在${({DIRECTORY:'同步店铺目录',ORDERS:'读取订单',REFUNDS:'核对退款',CALCULATING:'计算客单价'})[p.phase]||'同步'} · 已完成 ${p.completed||0} / ${p.total||'—'} 批${p.failed?' · 未完成 '+p.failed+' 批':''}。${p.collection_seconds?'实际读取 '+minutes+'分'+seconds+'秒；':''}截止 ${time(p.cutoff)}；已完成批次会保存，关闭页面不影响任务。`;

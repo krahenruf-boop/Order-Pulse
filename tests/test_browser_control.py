@@ -1,4 +1,4 @@
-"""Control belongs to a running browser operation, never to an idle poll."""
+"""Task control and five-minute idle grace stay separate from source polling."""
 import asyncio
 import json
 import subprocess
@@ -13,7 +13,7 @@ from tests import test_aov_cards as fixture
 BINDING=dict(space_id=11,expected_name='Order Pulse · 素材与客单价',profile_id='Default',profile_name='昊',auto_takeover=True)
 
 class BrowserControlTests(unittest.TestCase):
- def test_claim_is_released_on_success_missing_page_and_timeout(self):
+ def test_claim_is_retained_on_success_missing_page_and_timeout(self):
   for result in ({'space_id':11,'page_label':'p3'},{'error':'TMS_PAGE_REQUIRED'},None):
    source=DualSource(None)
    reply=SimpleNamespace(returncode=0,stdout='AOV_CONTROL:claimed\nAOV_BINDING:'+json.dumps(result),stderr='')
@@ -22,8 +22,7 @@ class BrowserControlTests(unittest.TestCase):
      if result and not result.get('error'):source.run_browser_task(source.resolve,BINDING)
      else:
       with self.assertRaises(ValueError):source.run_browser_task(source.resolve,BINDING)
-    release.assert_called_once()
-    self.assertEqual(release.call_args.args[1],BINDING)
+    release.assert_not_called()
     self.assertFalse(source._control.active)
     self.assertIsNone(source._control.claimed)
 

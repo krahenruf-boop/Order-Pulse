@@ -5,6 +5,7 @@ from .tms_core.monitor_domain import stamp
 from .balance.module import BalanceModule
 from .kalodata.module import KalodataModule
 from .integrations.browser_binding import BrowserSpaceBinding, OperationsSpaceBinding
+from .integrations.browser_control import BrowserControl
 
 ERRORS={
  'WAITING_FOR_BROWSER':'浏览器使用中，自动任务仍保持启用。完成操作后可确认交还并查询。',
@@ -33,6 +34,9 @@ class Service:
         self.balance=BalanceModule(root,self.secrets,
             browser_lock=self.balance_browser_space.lock,browser_binding=self.balance_browser_space)
         self.kalodata=KalodataModule(root,self.repo,self.secrets)
+        self.browser_control=BrowserControl(self.browser_space,self.balance_browser_space)
+        if self.kalodata.production:
+            self.kalodata.transport.operation_guard=self.browser_control.operation
         self.lock=asyncio.Lock()
         self.stopping=False
         self.timer=None
@@ -52,6 +56,7 @@ class Service:
     async def startup(self):
         await self.balance.startup()
         await self.kalodata.startup()
+        if self.kalodata.production:self.browser_control.start()
         self.timer=asyncio.create_task(self.scheduler())
 
     async def shutdown(self):
@@ -59,6 +64,7 @@ class Service:
         if self.timer:
             self.timer.cancel()
             await asyncio.gather(self.timer,return_exceptions=True)
+        await self.browser_control.stop()
         await self.kalodata.shutdown()
         await self.balance.shutdown()
 

@@ -1,6 +1,6 @@
 import { observeDOM } from './observer.js';
 const BASE='http://127.0.0.1:8876/materials-bridge/v1';
-const PLUGIN_VERSION='1.1.4',BUILD_ID='20261010.1',KALODATA_ADAPTER='2026-09-v2';
+const PLUGIN_VERSION='1.1.5',BUILD_ID='20261015.1',KALODATA_ADAPTER='2026-09-v2';
 let busy=false,lastJob=null,context=null,snapshot=null;
 async function call(path,body,token){
  const r=await fetch(BASE+path,{method:body?'POST':'GET',headers:{...(body?{'Content-Type':'application/json'}:{}),...(token?{Authorization:'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{})});
@@ -36,9 +36,17 @@ async function execute(job,s){
    const tabs=await chrome.tabs.query({url:'https://www.kalodata.com/product/detail*'});
    let tab=tabs.find(t=>{const x=new URL(t.url);return x.searchParams.get('id')===u.searchParams.get('id')&&x.searchParams.get('region')===u.searchParams.get('region');});
    if(!tab)tab=await chrome.tabs.create({url:u.href,active:true});
+   else {
+    // Only an explicit extraction activates/refreshes the chosen product. A
+    // background tab may throttle DOM timers or retain a failed empty response.
+    await chrome.tabs.update(tab.id,{active:true});
+    await chrome.tabs.reload(tab.id);
+   }
    s.tabId=tab.id;await chrome.storage.local.set({tabId:s.tabId});await loaded(s.tabId,u.href);context=null;snapshot=null;
   }
   if(!s.tabId)return failure('CONTEXT_CHANGED');
+  // Another module may have used its own tab between operations.
+  await chrome.tabs.update(s.tabId,{active:true});
   const payload={...job.payload,...(context?{_page_size:context.page_size}:{})};
   if(job.operation==='verify_context'&&snapshot)Object.assign(payload,{_expected_page:snapshot.page,_row_ids:snapshot.ids});
   let targetId=s.tabId;
@@ -48,14 +56,15 @@ async function execute(job,s){
    const checked=await inject(s.tabId,'verify_context',payload);if(!checked.success)return checked;
    const u=new URL(job.payload.observed_detail_url);
    if(u.origin!=='https://www.kalodata.com'||u.pathname!=='/video/detail'||u.searchParams.get('id')!==job.payload.video_id)return failure('LINK_ID_MISMATCH');
-   owned=await chrome.tabs.create({url:u.href,active:false});targetId=owned.id;await loaded(targetId,u.href);
+   const source=await chrome.tabs.get(s.tabId);
+   owned=await chrome.tabs.create({url:u.href,active:true,windowId:source.windowId});targetId=owned.id;await loaded(targetId,u.href);
   }
   let response=await inject(targetId,job.operation,payload);
   if(response.success&&job.operation==='apply_period'){context=response.data;snapshot=null;}
   if(response.success&&job.operation==='read_visible_page')snapshot={run:job.payload.run_id,page:job.payload.source_page,ids:response.data.rows.map(r=>r.video_id)};
   if(owned){const checked=await inject(s.tabId,'verify_context',payload);if(!checked.success)response=checked;}
   return response;
- }finally{if(owned)await chrome.tabs.remove(owned.id).catch(()=>{});}
+ }finally{if(owned){await chrome.tabs.remove(owned.id).catch(()=>{});await chrome.tabs.update(s.tabId,{active:true}).catch(()=>{});}}
 }
 async function poll(){
  if(busy)return;busy=true;

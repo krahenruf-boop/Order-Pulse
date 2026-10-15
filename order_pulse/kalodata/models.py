@@ -14,6 +14,9 @@ COUNT_KEYS = ('visited_rows','unique_videos','duplicate_occurrences','invalid_ro
 SAFE_DETAILS = {'cooldown_until','cooldown_seconds','visible_pages','source_page','source_index','missing_pages','state',
                 'expected_range','observed_range','observed_start','observed_end'}
 MESSAGES = {
+'BROWSER_BUSY':'素材与客单价空间正在执行另一项采集，请稍后重试。',
+'BROWSER_CONTROL_UNAVAILABLE':'无法取得素材与客单价空间控制权，请检查已绑定的空间是否可用。',
+'PLUGIN_RESPONSE_TIMEOUT':'采集插件未及时返回页面结果，请检查 Kalodata 页面后重试。',
 'MODULE_DISABLED':'素材模块尚未启用。','PLUGIN_OFFLINE':'素材采集插件未连接，请确认现有插件正在运行。',
 'PLUGIN_RELOAD_REQUIRED':'采集插件代码已更新，请重新加载浏览器扩展并刷新 Kalodata 页面。',
 'PLUGIN_VERSION_MISMATCH':'素材采集插件版本或日期适配器不兼容。','KALODATA_BUSY':'已有素材任务正在运行。',

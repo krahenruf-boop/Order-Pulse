@@ -6,6 +6,7 @@ import asyncio
 import time
 import math
 import re
+from contextlib import nullcontext
 from datetime import datetime,timezone,timedelta
 from email.utils import parsedate_to_datetime
 from ..models import KalodataError, validate_context, now_iso
@@ -15,6 +16,10 @@ class BrowserProvider:
     def __init__(self, transport=None, min_interval=2.0, operation_timeout=30.0):
         self.transport=transport;self.min_interval=min_interval;self.operation_timeout=operation_timeout
         self._last=0.;self._lock=None;self._session_ref=None;self._op=0;self._bindings={};self._cancelled=set()
+    async def _observe(self,operation,envelope):
+        guard=self.transport.control() if hasattr(self.transport,'control') else nullcontext()
+        async with guard:
+            return await asyncio.wait_for(self.transport.observe(operation,envelope),self.operation_timeout)
     async def capabilities(self):
         base=dict(transport_ready=False,session_label=SESSION_LABEL,session_ref=None,supported_operations=[],blocked_reason={'code':'PLUGIN_OFFLINE','message':KalodataError('PLUGIN_OFFLINE').message})
         if self.transport is None:return base
@@ -42,7 +47,7 @@ class BrowserProvider:
                 await asyncio.sleep(max(0,self.min_interval-(time.monotonic()-self._last)))
                 if (payload.get('run_id'),payload.get('generation')) in self._cancelled:raise KalodataError('CANCELLED',409)
                 self._last=time.monotonic()
-                try:response=await asyncio.wait_for(self.transport.observe(operation,envelope),self.operation_timeout)
+                try:response=await self._observe(operation,envelope)
                 except (asyncio.TimeoutError,ConnectionError):
                     if attempt==0:continue
                     raise KalodataError('NETWORK_ERROR',502,retryable=True)

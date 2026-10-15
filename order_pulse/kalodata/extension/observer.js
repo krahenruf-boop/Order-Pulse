@@ -7,6 +7,7 @@ export async function observeDOM(operation,payload){
  const safeURL=(value,path)=>{const u=new URL(value,location.href);if(u.origin!=='https://www.kalodata.com'||u.pathname!==path||u.username||u.password)throw Error('CONTEXT_CHANGED');return u;};
  const table=()=>Array.from(document.querySelectorAll('table')).find(e=>visible(e)&&text(e.querySelector('thead')).includes('视频内容'));
  const rows=()=>Array.from(table()?.querySelectorAll('tbody tr[data-row-key]')||[]).filter(visible);
+ const verifiedEmpty=()=>{const e=table()?.querySelector('.ant-table-placeholder');return visible(e)&&rows().length===0&&text(e).includes('暂无查询结果，请修改筛选条件或搜索词后重试。');};
  const canonical=x=>Array.isArray(x)?x.map(canonical):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,canonical(x[k])])):x;
  const digest=async x=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(canonical(x)))))).map(b=>b.toString(16).padStart(2,'0')).join('');
  // Capture only the destination emitted by this normal UI click, without loading TikTok media.
@@ -18,7 +19,7 @@ export async function observeDOM(operation,payload){
   finally{if(window.open===wrapper)window.open=original;}
  };
  const pagination=()=>table()?.closest('.ant-table-wrapper')?.querySelector('.ant-pagination');
- const currentPage=()=>Number(text(pagination()?.querySelector('.ant-pagination-item-active')));
+ const currentPage=()=>pagination()?Number(text(pagination().querySelector('.ant-pagination-item-active'))):verifiedEmpty()?1:0;
  const rowIds=()=>rows().map(r=>r.getAttribute('data-row-key'));
  const dateTokens=value=>Array.from(String(value||'').matchAll(/(?:^|[^0-9])(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?![0-9])/g),m=>{
   const y=Number(m[1]),month=Number(m[2]),day=Number(m[3]),d=new Date(Date.UTC(y,month-1,day));
@@ -58,7 +59,7 @@ export async function observeDOM(operation,payload){
   while(Date.now()<until){
    check();
    if(loading()){refreshed=true;prior=null;since=0;}
-   else if(table()&&pagination()&&currentPage()>0){
+   else if(table()&&(pagination()||verifiedEmpty())&&currentPage()>0){
     const sig=listSignature();if(before!==null&&sig!==before)refreshed=true;
     if(sig!==prior){prior=sig;since=Date.now();}
     if(refreshed&&Date.now()-since>=600)return true;
@@ -67,7 +68,7 @@ export async function observeDOM(operation,payload){
   }
   if(loading())throw Error('SOURCE_REFRESH_TIMEOUT');
   if(!table())throw Error('SOURCE_LIST_NOT_READY');
-  if(!pagination())throw Error('PAGINATION_SCHEMA_CHANGED');
+  if(!pagination()&&!verifiedEmpty())throw Error('PAGINATION_SCHEMA_CHANGED');
   // A declined date selection may leave a usable, stable list. Dates stay advisory.
   if(prior!==null&&Date.now()-since>=600)return false;
   throw Error('SOURCE_REFRESH_TIMEOUT');
@@ -94,14 +95,14 @@ export async function observeDOM(operation,payload){
   const days=a&&b?Math.round((Date.parse(b+'T00:00:00Z')-Date.parse(a+'T00:00:00Z'))/86400000)+1:null;
   const tolerance={"1D":[1,3],"7D":[5,10],"30D":[25,35],"90D":[80,100],"180D":[165,195],"365D":[330,400]}[payload.period];
   const dateStatus=refreshUnconfirmed?'UNKNOWN':selected&&period===payload.period&&days===requestedDays?'MATCHED':days&&tolerance&&days>=tolerance[0]&&days<=tolerance[1]?'APPROXIMATE':'UNKNOWN';
-  const rs=rows(),pg=pagination();if(!table())throw Error('SOURCE_LIST_NOT_READY');if(!pg)throw Error('PAGINATION_SCHEMA_CHANGED');
+  const rs=rows(),pg=pagination(),empty=verifiedEmpty();if(!table())throw Error('SOURCE_LIST_NOT_READY');if(!pg&&!empty)throw Error('PAGINATION_SCHEMA_CHANGED');
   if(!Number.isInteger(currentPage())||currentPage()<1)throw Error('PAGE_MISMATCH');
-  const prev=pg.querySelector('.ant-pagination-prev'),next=pg.querySelector('.ant-pagination-next');
+  const prev=pg?.querySelector('.ant-pagination-prev'),next=pg?.querySelector('.ant-pagination-next');
   const disabled=e=>!!e&&(e.classList.contains('ant-pagination-disabled')||e.getAttribute('aria-disabled')==='true'||!!e.querySelector('button:disabled'));
   // Only visible pagination controls establish the range; never change page size or entitlement.
-  const itemNumbers=Array.from(pg.querySelectorAll('.ant-pagination-item')).map(e=>Number(text(e))).filter(Number.isInteger);
+  const itemNumbers=Array.from(pg?.querySelectorAll('.ant-pagination-item')||[]).map(e=>Number(text(e))).filter(Number.isInteger);
   const sort=Array.from(table().querySelectorAll('th[aria-sort]')).filter(e=>['ascending','descending'].includes(e.getAttribute('aria-sort'))).map(e=>({field:text(e),direction:e.getAttribute('aria-sort')==='ascending'?'ASC':'DESC'}));
-  const c={product_id:u.searchParams.get('id'),region:u.searchParams.get('region'),period:period||null,requested_range:payload.period||null,observed_range:period||null,date_status:dateStatus,date_warning:dateStatus==='MATCHED'?null:dateStatus==='APPROXIMATE'?'页面日期范围可能与所选范围略有差异':'未确认页面日期范围，结果按当前 Kalodata 页面实际显示内容提取',actual_start_date:a||null,actual_end_date:b||null,site_date_label:a&&b?label+' '+a+' ~ '+b:'',site_timezone:null,date_basis:dateStatus==='UNKNOWN'?'unknown':'page_visible_range',page_size:payload._page_size||rs.length||10,visible_total:null,visible_pages:disabled(prev)&&disabled(next)?1:Math.max(...itemNumbers),observed_sort:sort,filters:{},source_mode:'ui_dom',captured_at:new Date().toISOString()};
+  const c={product_id:u.searchParams.get('id'),region:u.searchParams.get('region'),period:period||null,requested_range:payload.period||null,observed_range:period||null,date_status:dateStatus,date_warning:dateStatus==='MATCHED'?null:dateStatus==='APPROXIMATE'?'页面日期范围可能与所选范围略有差异':'未确认页面日期范围，结果按当前 Kalodata 页面实际显示内容提取',actual_start_date:a||null,actual_end_date:b||null,site_date_label:a&&b?label+' '+a+' ~ '+b:'',site_timezone:null,date_basis:dateStatus==='UNKNOWN'?'unknown':'page_visible_range',page_size:payload._page_size||rs.length||10,visible_total:empty?0:null,visible_pages:empty||disabled(prev)&&disabled(next)?1:Math.max(...itemNumbers),observed_sort:sort,filters:{},source_mode:'ui_dom',captured_at:new Date().toISOString()};
   const stable={...c};for(const k of ['captured_at','visible_total','visible_pages','site_date_label','date_warning','period','requested_range','observed_range','date_status','actual_start_date','actual_end_date','date_basis'])delete stable[k];c.context_fingerprint=await digest(stable);return c;
  };
  try{
@@ -140,7 +141,7 @@ export async function observeDOM(operation,payload){
     result.push({video_id:id,kalodata_video_url:href});
    }
    const after=await readContext();if(after.context_fingerprint!==c.context_fingerprint||JSON.stringify(rowIds())!==JSON.stringify(originalIds)||currentPage()!==payload.source_page)throw Error('CONTEXT_CHANGED');
-   return {success:true,data:{source_page:payload.source_page,context_fingerprint:c.context_fingerprint,product_id:c.product_id,region:c.region,page_size:c.page_size,visible_pages:c.visible_pages,verified:true,rows:result,empty_verified:result.length===0,observed_at:new Date().toISOString(),terminal_page:currentPage()===c.visible_pages&&pagination().querySelector('.ant-pagination-next')?.getAttribute('aria-disabled')==='true'}};
+   return {success:true,data:{source_page:payload.source_page,context_fingerprint:c.context_fingerprint,product_id:c.product_id,region:c.region,page_size:c.page_size,visible_pages:c.visible_pages,verified:true,rows:result,empty_verified:result.length===0,observed_at:new Date().toISOString(),terminal_page:verifiedEmpty()||currentPage()===c.visible_pages&&pagination()?.querySelector('.ant-pagination-next')?.getAttribute('aria-disabled')==='true'}};
   }
   if(operation==='inspect_ui')return {success:true,data:{context:await readContext(),rows:rows().slice(0,1).map(r=>({id:r.getAttribute('data-row-key'),elements:Array.from(r.querySelectorAll('td:nth-child(2) div,td:nth-child(2) span')).filter(e=>visible(e)&&e.children.length===0).map(e=>({text:text(e).slice(0,200),class:e.className}))})),pagination:pagination()?.outerHTML.replace(/<svg[\s\S]*?<\/svg>/g,'').slice(0,6000)}};
   throw Error('SCHEMA_CHANGED');

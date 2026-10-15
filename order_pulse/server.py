@@ -62,6 +62,11 @@ def create_app(root=None, service=None, port=PORT):
     async def browser_unavailable(request,exc):
         return JSONResponse({'error':ERRORS.get(str(exc),'浏览器暂不可用，请检查TMS页面。')},409)
 
+    from .kalodata.models import KalodataError
+    @app.exception_handler(KalodataError)
+    async def material_unavailable(request,exc):
+        return JSONResponse({'error':exc.message},exc.status)
+
     @app.exception_handler(Exception)
     async def failed(request,exc):return JSONResponse({'error':'操作未完成，已有结果保留。'},500)
 

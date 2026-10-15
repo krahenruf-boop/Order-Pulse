@@ -34,8 +34,9 @@ for(const ownership of ['user','agentDelegatedToUser']) {
  for(const fail of [false,true]) {
   r=await run([dedicated(0,{ownership})],{fail});
   assert.equal(r.result.ok,!fail);
-  assert.deepEqual(r.calls.at(-1),['handOff']);
+  assert.ok(r.calls.some(c=>['claim','takeOver'].includes(c[0])),'dedicated Balance can acquire control');
+  assert.equal(r.calls.some(c=>c[0]==='handOff'),false,'dedicated Balance retains control between tasks, including failures');
  }
 }
 r=await run([dedicated(0)]);assert.equal(r.calls.some(c=>c[0]==='handOff'),false,'keep existing Codex control');
-console.log('PASS: own task claims released on success/failure; external Codex control preserved');
+console.log('PASS: dedicated Balance keeps control on success/failure; takeover authorization and space identity still enforced');

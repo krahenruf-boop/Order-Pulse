@@ -8,15 +8,17 @@ import secrets
 import threading
 import time
 from concurrent.futures import Future
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from ..models import KalodataError
 
 OPERATIONS=['bind_product','apply_period','verify_context','read_visible_page','resolve_observed_link']
 PREFIX='/materials-bridge/v1'
-MINIMUM_SUPPORTED_PLUGIN_VERSION='1.1.4'
-REQUIRED_BUILD_ID='20261010.1'
+MINIMUM_SUPPORTED_PLUGIN_VERSION='1.1.5'
+REQUIRED_BUILD_ID='20261015.1'
 REQUIRED_KALODATA_ADAPTER='2026-09-v2'
 
 def _version_tuple(value):
@@ -29,6 +31,7 @@ class KalodataPluginClient:
         self.lock=threading.RLock();self.job=None;self.future=None;self.last_seen=0;self.bound=False
         self.logged_in=None;self.plugin_version=None;self.build_id=None;self.kalodata_adapter=None;self.last_success_at=None;self.bridge_error=None
         self.server=None;self.server_task=None
+        self.operation_guard=None
         self.code=secrets.token_urlsafe(18);self.code_expires=time.time()+1800
         saved=credentials.namespace('kalodata').get('plugin_bridge',{})
         if not saved and legacy_auth and Path(legacy_auth).is_file():
@@ -70,7 +73,8 @@ class KalodataPluginClient:
         status=self.info()
         if check_login and status['state']=='CONNECTED' and self.job is None:
             try:
-                reply=await self.observe('inspect_ui',dict(operation_id='health',run_id=None,generation=0))
+                async with self.control():
+                    reply=await self.observe('inspect_ui',dict(operation_id='health',run_id=None,generation=0))
                 if reply.get('success') is True:self.logged_in=True
                 elif reply.get('login_required') or reply.get('error_code')=='LOGIN_REQUIRED':self.logged_in=False
             except (ConnectionError,asyncio.TimeoutError):pass
@@ -114,9 +118,18 @@ class KalodataPluginClient:
             future=Future();ident=secrets.token_hex(16)
             self.job=dict(id=ident,operation=operation,payload=payload);self.future=future
         try:return await asyncio.wait_for(asyncio.wrap_future(future),28)
+        except asyncio.TimeoutError:
+            raise KalodataError('PLUGIN_RESPONSE_TIMEOUT',504,retryable=True) from None
         finally:
             with self.lock:
                 if self.job and self.job['id']==ident:self.job=None;self.future=None
+
+    @asynccontextmanager
+    async def control(self):
+        if self.operation_guard:
+            async with self.operation_guard():yield
+        else:yield
+
     async def cancel(self,run_id,generation):
         with self.lock:
             if self.job and self.job['payload'].get('run_id')==run_id:

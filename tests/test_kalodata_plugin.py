@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from contextlib import asynccontextmanager
 
 from fastapi.testclient import TestClient
 from order_pulse.storage import Repository as MainRepository, Credentials
@@ -84,6 +85,29 @@ class PluginHealthTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0);await self.plugin.cancel('r',1)
         with self.assertRaises(asyncio.CancelledError):await task
         self.assertIsNone(self.plugin.job)
+    async def test_control_precedes_plugin_dispatch_and_failure_does_not_enqueue(self):
+        self.heartbeat();events=[]
+        @asynccontextmanager
+        async def guard():
+            events.append('control')
+            self.assertIsNone(self.plugin.job)
+            raise KalodataError('BROWSER_CONTROL_UNAVAILABLE',503)
+            yield
+        self.plugin.operation_guard=guard
+        provider=BrowserProvider(self.plugin,min_interval=0)
+        await provider.capabilities()
+        with self.assertRaises(KalodataError) as exc:await provider._call('bind_product',{'run_id':'r','generation':1})
+        self.assertEqual(exc.exception.code,'BROWSER_CONTROL_UNAVAILABLE')
+        self.assertEqual(events,['control']);self.assertIsNone(self.plugin.job)
+
+    async def test_plugin_timeout_has_specific_error_and_clears_pending_job(self):
+        from unittest.mock import patch
+        async def expired(awaitable,seconds):
+            awaitable.cancel()
+            raise asyncio.TimeoutError()
+        with patch('order_pulse.kalodata.connectors.plugin_client.asyncio.wait_for',side_effect=expired):
+            with self.assertRaises(KalodataError) as exc:await self.plugin.observe('bind_product',{'run_id':'r','generation':1})
+        self.assertEqual(exc.exception.code,'PLUGIN_RESPONSE_TIMEOUT');self.assertIsNone(self.plugin.job)
     async def test_module_has_no_browser_lock_or_automation_transport(self):
         main=MainRepository(self.tmp.name);module=KalodataModule(self.tmp.name,main,self.credentials)
         self.assertIsInstance(module.transport,KalodataPluginClient)
