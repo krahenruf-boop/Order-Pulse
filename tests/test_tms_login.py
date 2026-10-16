@@ -109,7 +109,12 @@ globalThis.document={querySelectorAll:s=>s==='body *'?[...inputs,notice]:
   spec=dict(binding=BINDING,account=dict(employee_id='1',supplier_id='2',customer_id='3'),probe_only=probe_only,credentials=dict(username='sample-account',password='test-only-secret'))
   entry=dict(id=11,name=BINDING['expected_name'],profileId=profile,profileName='昊',ownership='agent')
   program='const INPUT='+json.dumps(spec)+';const views='+json.dumps(views)+';const calls=[];const listTaskSpaces=async()=>['+json.dumps(entry)+'''];
-const p={evaluate:async()=>views.shift(),fill:async s=>calls.push(s),click:async()=>calls.push('submit'),waitForFunction:async()=>{},url:async()=>'https://tms.mabangerp.com/#/default',goto:async url=>calls.push(url)};
+const p={evaluate:async()=>views.shift(),fill:async s=>calls.push(s),click:async()=>calls.push('submit'),waitForFunction:async fn=>{
+ let employee;globalThis.location={hash:'#/default'};
+ globalThis.document={querySelector:()=>({__vue__:{$store:{state:{employee}}}}),querySelectorAll:()=>[]};
+ const before=fn();employee={id:'1',supplierId:'2',customerId:'3'};
+ calls.push('session-ready:'+before+':'+fn());
+},url:async()=>'https://tms.mabangerp.com/#/default',goto:async url=>calls.push(url)};
 const task={spaceId:11,tabs:async()=>[{label:'p1',url:'https://tms.mabangerp.com/#/login'}],page:()=>p};const taskSpace=async()=>task;
 '''
   output=subprocess.run(['node','--input-type=module'],input=program+Path('order_pulse/integrations/ego_tms_login.js').read_text()+'\nconsole.log(JSON.stringify(calls));',text=True,capture_output=True,check=True).stdout
@@ -126,6 +131,7 @@ const task={spaceId:11,tabs:async()=>[{label:'p1',url:'https://tms.mabangerp.com
   session={'kind':'SESSION','account':dict(employee_id='1',supplier_id='2',customer_id='3')}
   result,calls=self.execute([{'kind':'FORM'}]*3+[session]);self.assertEqual(result['status'],'SIGNED_IN')
   self.assertIn('el-icon-s-custom',calls[0]);self.assertIn('el-icon-key',calls[1])
+  self.assertIn('session-ready:false:true',calls)
   self.assertEqual(calls[-1],'https://tms.mabangerp.com/#/myorderlist')
   result,calls=self.execute([dict(session,account={'employee_id':'other'})]);self.assertEqual(result['status'],'ACCOUNT_SCOPE_CHANGED');self.assertEqual(calls,[])
   result,calls=self.execute([{'kind':'FORM'}],profile='other');self.assertEqual(result['status'],'UNAVAILABLE');self.assertEqual(calls,[])

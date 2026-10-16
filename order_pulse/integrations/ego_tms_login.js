@@ -47,7 +47,13 @@ try {
     if((await p.evaluate(loginView)).kind!=='FORM')throw Error('FORM_CHANGED');
     await p.click('form button.el-button--primary',{label:'提交马帮登录'});
     // Wait for a visible challenge, validation error or normal signed-in route.
-    try {await p.waitForFunction(()=>location.hash!=='#/login'||[...document.querySelectorAll('body *')].some(e=>!e.children.length&&e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().bottom>0&&/拖动.*滑块|滑动.*验证|拼图|安全验证|验证码|密码错误|密码不正确|账号或密码|用户名或密码|登录失败/.test(e.textContent)),undefined,{timeout:20000});}catch{}
+    try {await p.waitForFunction(()=>{
+      const employee=document.querySelector('#app')?.__vue__?.$store?.state?.employee;
+      // Vue changes the route before hydrating the signed-in employee. A route
+      // change alone is not sufficient to validate the session identity.
+      return location.hash!=='#/login'&&employee?.id!=null&&employee?.supplierId!=null&&employee?.customerId!=null||
+        [...document.querySelectorAll('body *')].some(e=>!e.children.length&&e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().bottom>0&&e.getBoundingClientRect().top<innerHeight&&/拖动.*滑块|滑动.*验证|拼图|安全验证|验证码|密码错误|密码不正确|账号或密码|用户名或密码|登录失败/.test(e.textContent));
+    },undefined,{timeout:20000});}catch{}
     view=await p.evaluate(loginView);
     if(view.kind==='CHALLENGE')result={status:'VERIFICATION_REQUIRED'};
     else if(view.kind==='REJECTED')result={status:'CREDENTIALS_REJECTED'};
