@@ -188,7 +188,7 @@ class KalodataPluginClient:
                 response={k:d[k] for k in ['success','error_code','data','http_status','login_required','challenge','entitlement_denied','retry_after'] if k in d}
                 response.update(session_ref=self.session_ref,operation_id=p.get('operation_id'),run_id=p.get('run_id'),generation=p.get('generation'))
                 if response.get('success') is True:self.logged_in=True
-                elif response.get('login_required') or response.get('error_code')=='LOGIN_REQUIRED':self.logged_in=False
+                elif response.get('login_required') or response.get('challenge') or response.get('http_status')==401 or response.get('error_code') in ('LOGIN_REQUIRED','KALODATA_LOGIN_REQUIRED'):self.logged_in=False
                 self.future.set_result(response)
             return {'accepted':True}
         return app

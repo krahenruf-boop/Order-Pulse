@@ -36,6 +36,8 @@ class Service:
             browser_lock=self.balance_browser_space.lock,browser_binding=self.balance_browser_space)
         self.kalodata=KalodataModule(root,self.repo,self.secrets)
         self.browser_control=BrowserControl(self.browser_space,self.balance_browser_space)
+        self.balance.bridge.return_to_workbench=lambda: self.browser_control.show_workbench('balance')
+        self.browser_control.material_needs_user=lambda: self.kalodata.transport.logged_in is False
         self.tms_login=TmsLogin(self)
         if self.kalodata.production:
             self.kalodata.transport.operation_guard=self.browser_control.operation

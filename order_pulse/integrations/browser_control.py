@@ -14,6 +14,35 @@ class BrowserControl:
         self.operations, self.balance = operations, balance
         self.worker = None
         self.states = {}
+        self.workbench_states = {}
+        self.material_needs_user = lambda: False
+
+    def show_workbench(self, module, *, locked=False):
+        """Best-effort completion UI; never competes with another source operation."""
+        if module not in ('balance', 'aov-monitor', 'kalodata'):
+            return 'INVALID_MODULE'
+        owner = self.balance if module == 'balance' else self.operations
+        acquired = False
+        if not locked:
+            acquired = owner.lock.acquire(blocking=False)
+            if not acquired:
+                return 'BUSY'
+        try:
+            binding = owner.get()
+            if not binding:
+                return 'BINDING_REQUIRED'
+            result = execute(Path(__file__).with_name('ego_workbench.js'),
+                             dict(binding=binding, module=module),
+                             'ORDER_PULSE_WORKBENCH:', timeout=8)
+            state = result.get('state', 'UNAVAILABLE')
+        except Exception:
+            # A tab closing or an unavailable browser must not replace a task result.
+            state = 'UNAVAILABLE'
+        finally:
+            if acquired:
+                owner.lock.release()
+        self.workbench_states[module] = state
+        return state
 
     def ensure(self, binding, reason):
         if not binding:
@@ -41,14 +70,20 @@ class BrowserControl:
             if asyncio.get_running_loop().time() >= deadline:
                 raise KalodataError('BROWSER_BUSY', 409, retryable=True)
             await asyncio.sleep(.1)
+        controlled = False
         try:
             state = await blocking(self.ensure, self.operations.get(), 'task')
             if state != 'CONTROLLED':
                 raise KalodataError('BROWSER_CONTROL_UNAVAILABLE', 503, retryable=True)
+            controlled = True
             yield
         finally:
-            # Normal idle state is Agent-controlled; only release the operation mutex.
-            self.operations.lock.release()
+            try:
+                if controlled and not self.material_needs_user():
+                    await blocking(lambda: self.show_workbench('kalodata', locked=True))
+            finally:
+                # Normal idle state is Agent-controlled; release only the mutex.
+                self.operations.lock.release()
 
     async def maintain_once(self):
         await blocking(self.ensure, self.balance.get(), 'balance')

@@ -81,6 +81,9 @@ class DualSource:
         finally:
             self._control.active=False
             self._control.claimed=None
+            control=getattr(self.host,'browser_control',None)
+            if control:
+                control.show_workbench('aov-monitor')
     def _remember_claim(self,output,shared):
         if isinstance(output,bytes):output=output.decode('utf-8',errors='replace')
         if 'AOV_CONTROL:claimed' in (output or '').splitlines():self._control.claimed=dict(shared)

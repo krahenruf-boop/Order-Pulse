@@ -85,6 +85,17 @@ class PluginHealthTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0);await self.plugin.cancel('r',1)
         with self.assertRaises(asyncio.CancelledError):await task
         self.assertIsNone(self.plugin.job)
+    async def test_challenge_and_login_response_preserve_source_for_user(self):
+        for reason in ({'challenge':True}, {'http_status':401}, {'error_code':'KALODATA_LOGIN_REQUIRED'}):
+            with self.subTest(reason=reason):
+                self.plugin.logged_in=True
+                task=asyncio.create_task(self.plugin.observe('inspect_ui',{'operation_id':'health','run_id':None,'generation':0}))
+                await asyncio.sleep(0)
+                job=self.heartbeat().json()['job']
+                reply=self.http.post(PREFIX+'/result',json={'id':job['id'],'success':False,**reason},headers=self.headers)
+                self.assertTrue(reply.json()['accepted'])
+                await task
+                self.assertFalse(self.plugin.logged_in)
     async def test_control_precedes_plugin_dispatch_and_failure_does_not_enqueue(self):
         self.heartbeat();events=[]
         @asynccontextmanager

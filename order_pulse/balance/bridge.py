@@ -24,6 +24,7 @@ class BrowserBridge:
         self.last_seen = store.get("browser_last_seen")
         self.message = "请在 Order Pulse Balance + Kalodata 专用Space中打开并登录 Linkme资产列表"
         self._busy = False
+        self.return_to_workbench = None
         self._browser_lock = browser_lock
         self._browser_binding = browser_binding
         self._script = Path(__file__).resolve().parents[1] / "integrations" / "ego_balance.js"
@@ -55,6 +56,13 @@ class BrowserBridge:
             raise ValueError(f"充值系统余额采集正在冷却，请等待 {remaining} 秒后重试；未重复请求")
 
     def _execute(self, action):
+        try:
+            return self._read_source(action)
+        finally:
+            if self.return_to_workbench:
+                self.return_to_workbench()
+
+    def _read_source(self, action):
         if not self.target:
             raise ValueError("请先绑定 Order Pulse Balance + Kalodata 专用Space中的 Linkme页面")
         target = validate_target(self.target)
