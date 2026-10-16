@@ -4,11 +4,13 @@ This is the existing TikTok OPS 素材采集 MV3 extension, retained here so its
 fixes and backend version requirements can be maintained together. No new
 collector, extension identity, login, or browser profile is introduced.
 
-Current: **1.1.6 / 20261016.1**, protocol 2, adapter 2026-09-v2.
+Current: **1.1.7 / 20261016.2**, protocol 2, adapter 2026-09-v2.
 
 Explicit extraction refreshes its product tab and reads details in inactive tabs.
 It never activates a source tab or navigates the Order Pulse workbench.
-The adapter reveals the video section heading before reading pagination, because
+The adapter reveals the video section heading after the date refresh and before
+reading pagination. Changing dates resets the scroll position and lazy count;
+revealing it earlier can leave the provisional one-page pager unchanged.
 Kalodata defers its count request until that heading enters the viewport.
 The host keeps only the bound Space's Kalodata tabs rendering during a task,
 then removes the rendering lease on success, failure, cancellation or shutdown.
@@ -32,4 +34,8 @@ Local targeted tests:
 
 No credentials, pairing tokens, browser data or database files belong here.
 
-Explicit extraction now activates and refreshes its product tab once before reading, preventing dormant-page timers and stale failed lists. Recognized empty-result text is accepted without a pagination bar; unknown missing pagination still fails closed. Plugin response timeouts have a separate error from network failures. The host obtains the saved Space control and shared operation mutex before dispatching work; passive health never claims control.
+Explicit extraction refreshes its product tab once in the background. Recognized
+empty-result text is accepted without a pagination bar; unknown missing
+pagination still fails closed. The host obtains the saved Space control and
+shared operation mutex before dispatching work; passive health never claims
+control.

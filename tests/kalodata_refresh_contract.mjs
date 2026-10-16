@@ -6,18 +6,20 @@ import {webcrypto} from 'node:crypto';
 const source=readFileSync(new URL('../order_pulse/kalodata/extension/observer.js',import.meta.url),'utf8').replace('export async function','async function');
 async function run(mode){
  let clock=10000,clicked=null,selected=mode==='cold-singleton'?'180D':'30D';const clicks=[];
+ const lazy=['cold-singleton','date-reset'].includes(mode);
  let revealed=null;
  const refreshed=()=>mode==='cold-singleton'?revealed!==null&&clock-revealed>=1800:clicked!==null&&clock-clicked>=1800;
  const loading=()=>mode==='stuck' ? clicked!==null : clicked!==null&&clock-clicked>=800&&!refreshed();
  const el=(value='',attrs={})=>({innerText:value,textContent:value,children:[],className:'',parentElement:null,getClientRects:()=>[{}],getAttribute:k=>attrs[k]??null,classList:{contains:()=>false},matches:()=>false,querySelector:()=>null,querySelectorAll:()=>[]});
- const presets=['30D','180D'].map(period=>{const e=el('过去'+period.slice(0,-1)+'天');e.closest=()=>e;e.getAttribute=k=>k==='aria-selected'?String(selected===period):null;e.click=()=>{clicks.push(period);selected=period;clicked=clock;};return e;});
+ const presets=['30D','180D'].map(period=>{const e=el('过去'+period.slice(0,-1)+'天');e.closest=()=>e;e.getAttribute=k=>k==='aria-selected'?String(selected===period):null;e.click=()=>{clicks.push(period);selected=period;clicked=clock;if(mode==='date-reset')revealed=null;};return e;});
  const rows=()=>mode==='empty'?[]:Array.from({length:10},(_,i)=>el('video '+(refreshed()?'new':'old')+i,{'data-row-key':String((refreshed()?200:100)+i)}));
- const pg=el();Object.defineProperty(pg,'innerText',{get:()=>mode==='cold-singleton'&&!refreshed()?'1':refreshed()?'1 2 431':'1 2 130'});
+ const provisional=()=>lazy&&selected==='180D'&&(revealed===null||clock-revealed<1800);
+ const pg=el();Object.defineProperty(pg,'innerText',{get:()=>provisional()?'1':refreshed()?'1 2 431':'1 2 130'});
  pg.querySelector=s=>s==='.ant-pagination-item-active'?el('1'):el('',{'aria-disabled':s==='.ant-pagination-prev'?'true':'false'});
- pg.querySelectorAll=()=>mode==='cold-singleton'&&!refreshed()?[el('1')]:[el('1'),el(refreshed()?'431':'130')];
+ pg.querySelectorAll=()=>provisional()?[el('1')]:[el('1'),el(refreshed()?'431':'130')];
  const wrapper=el();wrapper.querySelector=()=>['empty','missing-pagination'].includes(mode)?null:pg;
  const table=el();table.closest=()=>wrapper;table.querySelector=s=>s==='thead'?el('视频内容'):s==='.ant-table-placeholder'&&mode==='empty'?el('暂无查询结果，请修改筛选条件或搜索词后重试。'):null;table.querySelectorAll=s=>s==='tbody tr[data-row-key]'?rows():s==='th[aria-sort]'?[el('成交金额',{'aria-sort':'descending'})]:[];
- if(mode==='cold-singleton'){
+ if(lazy){
   const heading=el('视频与广告');heading.scrollIntoView=()=>{revealed=clock;};
   const section=el();section.querySelectorAll=()=>[heading];table.parentElement=section;
  }
@@ -41,3 +43,6 @@ console.log('PASS verified empty versus missing pagination');
 const cold=await run('cold-singleton');assert.equal(cold.result.success,true,JSON.stringify(cold));assert.equal(cold.result.data.visible_pages,431);
 assert.deepEqual(cold.clicks,[],'reveal the video heading to load its count without extra date queries');
 console.log('PASS lazy video count loads before page range validation');
+const reset=await run('date-reset');assert.equal(reset.result.success,true,JSON.stringify(reset));assert.equal(reset.result.data.visible_pages,431,'date selection resets scroll and count; reveal the heading after refresh');
+assert.deepEqual(reset.clicks,['180D'],'one date query is sufficient on a reloaded product');
+console.log('PASS cold date change resets lazy count without reporting a false one-page limit');

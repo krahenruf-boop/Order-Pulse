@@ -17,8 +17,8 @@ from ..models import KalodataError
 
 OPERATIONS=['bind_product','apply_period','verify_context','read_visible_page','resolve_observed_link']
 PREFIX='/materials-bridge/v1'
-MINIMUM_SUPPORTED_PLUGIN_VERSION='1.1.6'
-REQUIRED_BUILD_ID='20261016.1'
+MINIMUM_SUPPORTED_PLUGIN_VERSION='1.1.7'
+REQUIRED_BUILD_ID='20261016.2'
 REQUIRED_KALODATA_ADAPTER='2026-09-v2'
 
 def _version_tuple(value):

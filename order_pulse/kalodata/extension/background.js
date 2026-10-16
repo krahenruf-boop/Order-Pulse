@@ -1,6 +1,6 @@
 import { observeDOM } from './observer.js';
 const BASE='http://127.0.0.1:8876/materials-bridge/v1';
-const PLUGIN_VERSION='1.1.6',BUILD_ID='20261016.1',KALODATA_ADAPTER='2026-09-v2';
+const PLUGIN_VERSION='1.1.7',BUILD_ID='20261016.2',KALODATA_ADAPTER='2026-09-v2';
 let busy=false,lastJob=null,context=null,snapshot=null;
 async function call(path,body,token){
  const r=await fetch(BASE+path,{method:body?'POST':'GET',headers:{...(body?{'Content-Type':'application/json'}:{}),...(token?{Authorization:'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{})});

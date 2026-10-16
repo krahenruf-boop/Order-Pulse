@@ -120,14 +120,6 @@ export async function observeDOM(operation,payload){
    if(!['1D','7D','30D','90D','180D','365D'].includes(payload.period))throw Error('PERIOD_UNAVAILABLE');
    // Let an initially opening product finish rendering before locating its presets.
    await settled();
-   // Kalodata loads the video count only when this section's heading enters
-   // the viewport. Rows alone arrive earlier with pagination.total=0 (page 1).
-   // Scrolling inside a background tab does not activate that tab.
-   let scope=table();
-   for(let depth=0;scope&&depth<14;depth++,scope=scope.parentElement){
-    const heading=Array.from(scope.querySelectorAll('div,span,h2,h3')).find(e=>visible(e)&&e.children.length===0&&/^(?:视频与广告|Video & Ad|Videos & Ads)$/i.test(text(e)));
-    if(heading){heading.scrollIntoView({block:'center'});break;}
-   }
    const current=selectedPeriod(),target=presetControls().get(payload.period);
    const choose=async control=>{
     const before=listSignature();control.el.click();
@@ -137,6 +129,15 @@ export async function observeDOM(operation,payload){
     await choose(target);
    }
    await settled({minElapsed:1500});
+   // Changing dates scrolls Kalodata back to the top and resets its lazy count.
+   // Reveal the video heading AFTER that refresh, even when rows already exist:
+   // their provisional pager still says "1" until this section enters view.
+   // Scrolling the background document never activates its tab.
+   let scope=table();
+   for(let depth=0;scope&&depth<14;depth++,scope=scope.parentElement){
+    const heading=Array.from(scope.querySelectorAll('div,span,h2,h3')).find(e=>visible(e)&&e.children.length===0&&/^(?:视频与广告|Video & Ad|Videos & Ads)$/i.test(text(e)));
+    if(heading){heading.scrollIntoView({block:'center',behavior:'instant'});break;}
+   }
    if(payload.requested_end_page>1){
     const until=Date.now()+8000;
     while(Date.now()<until&&Math.max(...Array.from(pagination()?.querySelectorAll('.ant-pagination-item')||[]).map(e=>Number(text(e))))===1){
