@@ -89,7 +89,7 @@ class DualSource:
         return dict(verified=contract.get('verified') is True,
             note=contract.get('note') or '待完成双来源金额、时区及退款覆盖核验；自动监控暂不可启用。',
             checked_at=contract.get('checked_at'),details=contract.get('details',[]))
-    def resolve(self,shared):
+    def resolve(self,shared,*,allow_login=True):
         script='const s='+json.dumps(dict(shared,task_active=getattr(self._control,'active',False)))+''';
 const entries=await listTaskSpaces();
 const matches=entries.filter(e=>e.name===s.expected_name&&e.profileId===s.profile_id&&e.profileName===s.profile_name);
@@ -130,6 +130,10 @@ console.log('AOV_BINDING:'+JSON.stringify({...result,...(browser?{browser}:{})})
                 try:self.host.browser_space.record_space(shared,browser)
                 except ValueError:raise ValueError('BROWSER_BINDING_REQUIRED') from None
             elif not value.get('error'):raise ValueError('BROWSER_BINDING_REQUIRED')
+        if (value.get('error')=='AUTH_REQUIRED' and allow_login and getattr(self._control,'active',False)
+            and getattr(self.host,'tms_login',None)):
+            if self.host.tms_login.attempt(self.host.browser_space.get()):
+                return self.resolve(self.host.browser_space.get(),allow_login=False)
         if value.get('error'):raise ValueError(value['error'])
         return value
     def collect(self,config,start,end):

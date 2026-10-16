@@ -38,6 +38,7 @@ const rows=await p.evaluate(x=>{const e=document.querySelector('#app')?.__vue__?
             tms=self._node(js,'AOV_TMS_DIRECTORY:',20)
         expected={str(s['shop_id']) for s in binding.get('stores',[]) if s.get('platform_id')==104}
         if not tms or not expected.issubset({s['id'] for s in tms}):raise ValueError('TMS_DIRECTORY_IDENTITY_CHANGED')
+        if getattr(self.host,'tms_login',None):self.host.tms_login.observed_signed_in()
         # Account verification remains in the existing TMS collector on every batch.
         self.real_verified=self.status()['verified']
         return dict(tms=tms,miaoshou=ms,target=target)
@@ -61,6 +62,7 @@ const rows=await p.evaluate(x=>{const e=document.querySelector('#app')?.__vue__?
                             raise error from None
                     raise
                 if value.get('account')!=binding['account'] or [b.get('partition') for b in value.get('batches',[])]!=['current','completed']:raise ValueError('TMS_COVERAGE_UNVERIFIED')
+                if getattr(self.host,'tms_login',None):self.host.tms_login.observed_signed_in()
                 rows=[]
                 for batch in value['batches']:
                     _validate_partition(batch,scope,500,Decimal(0))

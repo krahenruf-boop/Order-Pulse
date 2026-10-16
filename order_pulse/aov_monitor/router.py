@@ -7,6 +7,13 @@ def create_router(monitor):
     async def state():return monitor.state()
     @router.get('/config')
     async def config():return monitor.store.config()
+    @router.get('/login')
+    async def login_state():return monitor.host.tms_login.state()
+    @router.post('/login')
+    async def login_save(request:Request):
+        from ..browser import blocking
+        if monitor.worker and not monitor.worker.done():raise ValueError('正在采集，请结束后修改登录设置')
+        return await blocking(monitor.host.tms_login.configure,await request.json())
     @router.post('/config')
     async def save(request:Request):return monitor.settings(await request.json())
     @router.get('/mappings')
