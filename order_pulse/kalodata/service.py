@@ -61,9 +61,12 @@ class Service:
 
     async def _prepare_product(self,run_id):
         run=self.repo.get_run(run_id);gen=run['generation'];request=run['request'];started=time.monotonic()
+        began=False
         try:
             self.repo.stage(run_id,gen,'preflighting')
             await self.available()
+            if hasattr(self.connector,'begin_run'):
+                await self.connector.begin_run();began=True
             context=validate_context(await self.connector.preflight(request),request)
             self._assert_active(run_id,gen,started)
             context=await self.connector.revalidate(request,context,run_id,gen)
@@ -75,6 +78,8 @@ class Service:
             self.note_error(error);self.repo.finish(run_id,'failed',error.code,error.details)
         except Exception:
             self.repo.finish(run_id,'failed','SOURCE_LOAD_FAILED')
+        finally:
+            if began and hasattr(self.connector,'end_run'):await self.connector.end_run()
     def note_error(self,error):
         if error.code=='RATE_LIMITED' and error.details.get('cooldown_until'):
             self.repo.set_state('cooldown_until',error.details['cooldown_until'])

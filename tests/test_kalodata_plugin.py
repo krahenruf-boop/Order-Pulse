@@ -110,6 +110,22 @@ class PluginHealthTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(KalodataError) as exc:await provider._call('bind_product',{'run_id':'r','generation':1})
         self.assertEqual(exc.exception.code,'BROWSER_CONTROL_UNAVAILABLE')
         self.assertEqual(events,['control']);self.assertIsNone(self.plugin.job)
+    async def test_rendering_survives_operation_boundaries_and_nested_run_lifecycle(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        lease=SimpleNamespace(start=Mock(),stop=Mock())
+        self.plugin.background_factory=lambda:lease
+        await self.plugin.begin_run()
+        async with self.plugin.control():pass
+        async with self.plugin.control():pass
+        lease.start.assert_called_once();lease.stop.assert_not_called()
+        await self.plugin.begin_run()
+        await self.plugin.end_run()
+        lease.stop.assert_not_called()
+        await self.plugin.end_run()
+        lease.stop.assert_called_once();self.assertIsNone(self.plugin.background)
+        async with self.plugin.control():pass
+        self.assertEqual(lease.start.call_count,2);self.assertEqual(lease.stop.call_count,2)
 
     async def test_plugin_timeout_has_specific_error_and_clears_pending_job(self):
         from unittest.mock import patch

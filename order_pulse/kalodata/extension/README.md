@@ -4,7 +4,14 @@ This is the existing TikTok OPS 素材采集 MV3 extension, retained here so its
 fixes and backend version requirements can be maintained together. No new
 collector, extension identity, login, or browser profile is introduced.
 
-Current: **1.1.5 / 20261015.1**, protocol 2, adapter 2026-09-v2.
+Current: **1.1.6 / 20261016.1**, protocol 2, adapter 2026-09-v2.
+
+Explicit extraction refreshes its product tab and reads details in inactive tabs.
+It never activates a source tab or navigates the Order Pulse workbench.
+The adapter reveals the video section heading before reading pagination, because
+Kalodata defers its count request until that heading enters the viewport.
+The host keeps only the bound Space's Kalodata tabs rendering during a task,
+then removes the rendering lease on success, failure, cancellation or shutdown.
 
 For the existing personal Mac deployment, copy only the changed source files
 into its original unpacked-extension folder shown in the browser's extension

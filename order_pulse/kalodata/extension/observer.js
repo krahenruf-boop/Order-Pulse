@@ -54,15 +54,16 @@ export async function observeDOM(operation,payload){
  // context only after list refresh evidence, then a quiet interval including pagination.
  const listSignature=()=>JSON.stringify([currentPage(),rows().map(r=>[r.getAttribute('data-row-key'),text(r)]),text(pagination()),Array.from(table()?.querySelectorAll('th[aria-sort]')||[]).map(e=>[text(e),e.getAttribute('aria-sort')])]);
  const loading=()=>Array.from(document.querySelectorAll('.ant-spin-spinning')).some(visible);
- const settled=async({before=null,requireRefresh=false}={})=>{
-  const until=Date.now()+12000;let prior=null,since=0,refreshed=!requireRefresh;
+ const settled=async({before=null,requireRefresh=false,minElapsed=0}={})=>{
+  const began=Date.now(),until=began+12000;let prior=null,since=0,refreshed=!requireRefresh;
   while(Date.now()<until){
    check();
    if(loading()){refreshed=true;prior=null;since=0;}
    else if(table()&&(pagination()||verifiedEmpty())&&currentPage()>0){
     const sig=listSignature();if(before!==null&&sig!==before)refreshed=true;
     if(sig!==prior){prior=sig;since=Date.now();}
-    if(refreshed&&Date.now()-since>=600)return true;
+    // A provisional pager can change before a delayed spinner appears.
+    if(refreshed&&Date.now()-since>=600&&Date.now()-began>=Math.max(minElapsed,requireRefresh?1500:0))return true;
    }else{prior=null;since=0;}
    await new Promise(r=>setTimeout(r,150));
   }
@@ -119,10 +120,28 @@ export async function observeDOM(operation,payload){
    if(!['1D','7D','30D','90D','180D','365D'].includes(payload.period))throw Error('PERIOD_UNAVAILABLE');
    // Let an initially opening product finish rendering before locating its presets.
    await settled();
+   // Kalodata loads the video count only when this section's heading enters
+   // the viewport. Rows alone arrive earlier with pagination.total=0 (page 1).
+   // Scrolling inside a background tab does not activate that tab.
+   let scope=table();
+   for(let depth=0;scope&&depth<14;depth++,scope=scope.parentElement){
+    const heading=Array.from(scope.querySelectorAll('div,span,h2,h3')).find(e=>visible(e)&&e.children.length===0&&/^(?:视频与广告|Video & Ad|Videos & Ads)$/i.test(text(e)));
+    if(heading){heading.scrollIntoView({block:'center'});break;}
+   }
    const current=selectedPeriod(),target=presetControls().get(payload.period);
-   if(current?.period!==payload.period&&target&&!target.disabled){
-    const before=listSignature();target.el.click();
+   const choose=async control=>{
+    const before=listSignature();control.el.click();
     refreshUnconfirmed=!(await settled({before,requireRefresh:true}));
+   };
+   if(current?.period!==payload.period&&target&&!target.disabled){
+    await choose(target);
+   }
+   await settled({minElapsed:1500});
+   if(payload.requested_end_page>1){
+    const until=Date.now()+8000;
+    while(Date.now()<until&&Math.max(...Array.from(pagination()?.querySelectorAll('.ant-pagination-item')||[]).map(e=>Number(text(e))))===1){
+     check();await new Promise(r=>setTimeout(r,150));
+    }
    }
    await goPage(1);
    return {success:true,data:await readContext()};
@@ -137,7 +156,11 @@ export async function observeDOM(operation,payload){
    check();const id=row.getAttribute('data-row-key');if(!/^\d+$/.test(id||''))throw Error('VIDEO_ITEM_SCHEMA_CHANGED');
     const td=row.querySelector('td:nth-child(2)');
     const title=Array.from(td?.querySelectorAll('div,span,p')||[]).find(e=>visible(e)&&e.children.length===0&&text(e).length>0&&!/^(?:AD|工具箱|\d+(?:m|s)(?: \d+s)?)$/.test(text(e))&&!e.classList.contains('kds-icon'));
-    let href=null;try{href=await clickDestination(title,u=>u.origin==='https://www.kalodata.com'&&u.pathname==='/video/detail'&&u.searchParams.get('id')===id);}catch(e){if(e.message!=='LINK_NOT_FOUND')throw e;}
+    const matchesDetail=u=>u.origin==='https://www.kalodata.com'&&u.pathname==='/video/detail'&&u.searchParams.get('id')===id;
+    let href=null;try{href=await clickDestination(title,matchesDetail);}catch(e){if(e.message!=='LINK_NOT_FOUND')throw e;}
+    // Some valid videos have no description. The normal row click still opens
+    // their detail page; accept only a destination carrying this exact video ID.
+    if(!href)try{href=await clickDestination(row,matchesDetail);}catch(e){if(e.message!=='LINK_NOT_FOUND')throw e;}
     result.push({video_id:id,kalodata_video_url:href});
    }
    const after=await readContext();if(after.context_fingerprint!==c.context_fingerprint||JSON.stringify(rowIds())!==JSON.stringify(originalIds)||currentPage()!==payload.source_page)throw Error('CONTEXT_CHANGED');

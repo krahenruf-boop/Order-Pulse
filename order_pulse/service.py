@@ -40,6 +40,8 @@ class Service:
         self.browser_control.material_needs_user=lambda: self.kalodata.transport.logged_in is False
         self.tms_login=TmsLogin(self)
         if self.kalodata.production:
+            from .integrations.material_background import MaterialBackground
+            self.kalodata.transport.background_factory=lambda: MaterialBackground(self.browser_space.get())
             self.kalodata.transport.operation_guard=self.browser_control.operation
         self.lock=asyncio.Lock()
         self.stopping=False

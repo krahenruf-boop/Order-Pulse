@@ -87,7 +87,7 @@ class BrowserProvider:
             raise KalodataError(code if code in {'PLUGIN_RELOAD_REQUIRED','PLUGIN_VERSION_MISMATCH'} else 'PLUGIN_OFFLINE',503)
         if request['session_ref']!=self._session_ref:raise KalodataError('SESSION_MISMATCH',403)
         await self._call('bind_product',{'product_url':request['product_url'],'run_id':None,'generation':0})
-        raw=await self._call('apply_period',{'period':request['period'],'run_id':None,'generation':0})
+        raw=await self._call('apply_period',{'period':request['period'],'requested_end_page':request['end_page'],'run_id':None,'generation':0})
         return validate_context(raw,request)
     async def revalidate(self,request,context,run_id,generation):
         if request['session_ref']!=self._session_ref:raise KalodataError('SESSION_MISMATCH',403)

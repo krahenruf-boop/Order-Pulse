@@ -17,8 +17,8 @@ from ..models import KalodataError
 
 OPERATIONS=['bind_product','apply_period','verify_context','read_visible_page','resolve_observed_link']
 PREFIX='/materials-bridge/v1'
-MINIMUM_SUPPORTED_PLUGIN_VERSION='1.1.5'
-REQUIRED_BUILD_ID='20261015.1'
+MINIMUM_SUPPORTED_PLUGIN_VERSION='1.1.6'
+REQUIRED_BUILD_ID='20261016.1'
 REQUIRED_KALODATA_ADAPTER='2026-09-v2'
 
 def _version_tuple(value):
@@ -32,6 +32,8 @@ class KalodataPluginClient:
         self.logged_in=None;self.plugin_version=None;self.build_id=None;self.kalodata_adapter=None;self.last_success_at=None;self.bridge_error=None
         self.server=None;self.server_task=None
         self.operation_guard=None
+        self.background_factory=None;self.background=None;self.browser_depth=0
+        self.last_observation=None
         self.code=secrets.token_urlsafe(18);self.code_expires=time.time()+1800
         saved=credentials.namespace('kalodata').get('plugin_bridge',{})
         if not saved and legacy_auth and Path(legacy_auth).is_file():
@@ -63,7 +65,8 @@ class KalodataPluginClient:
                     required_build_id=REQUIRED_BUILD_ID,required_kalodata_adapter=REQUIRED_KALODATA_ADAPTER,protocol_version=2,
                     browser_connected=connected,kalodata_logged_in=self.logged_in if connected else None,
                     active_job=(self.job or {}).get('payload',{}).get('run_id'),last_success_at=self.last_success_at,
-                    connected=connected,state=code or 'CONNECTED',transport='plugin',paired=bool(self.token))
+                    connected=connected,state=code or 'CONNECTED',transport='plugin',paired=bool(self.token),
+                    last_observation=self.last_observation)
 
     def status(self):return self.info()
 
@@ -126,9 +129,31 @@ class KalodataPluginClient:
 
     @asynccontextmanager
     async def control(self):
-        if self.operation_guard:
-            async with self.operation_guard():yield
-        else:yield
+        from contextlib import nullcontext
+        from ...browser import blocking
+        from ...integrations.ego_runtime import EgoRuntimeError
+        guard=self.operation_guard() if self.operation_guard else nullcontext()
+        async with guard:
+            try:
+                if self.background_factory and self.background is None:
+                    background=self.background_factory()
+                    try:await blocking(background.start)
+                    except EgoRuntimeError:raise KalodataError('BROWSER_CONTROL_UNAVAILABLE',503,retryable=True) from None
+                    self.background=background
+                yield
+            finally:
+                if self.browser_depth==0:await self._stop_background()
+
+    async def begin_run(self):self.browser_depth+=1
+
+    async def end_run(self):
+        self.browser_depth=max(0,self.browser_depth-1)
+        if self.browser_depth==0:await self._stop_background()
+
+    async def _stop_background(self):
+        from ...browser import blocking
+        background,self.background=self.background,None
+        if background:await blocking(background.stop)
 
     async def cancel(self,run_id,generation):
         with self.lock:
@@ -187,6 +212,10 @@ class KalodataPluginClient:
                 # Correlation is server-controlled, not trusted from page contents.
                 response={k:d[k] for k in ['success','error_code','data','http_status','login_required','challenge','entitlement_denied','retry_after'] if k in d}
                 response.update(session_ref=self.session_ref,operation_id=p.get('operation_id'),run_id=p.get('run_id'),generation=p.get('generation'))
+                data=response.get('data');data=data if isinstance(data,dict) else {}
+                self.last_observation=dict(operation=self.job['operation'],success=response.get('success') is True,
+                                           visible_pages=data.get('visible_pages'),source_page=data.get('source_page'),
+                                           error_code=response.get('error_code'))
                 if response.get('success') is True:self.logged_in=True
                 elif response.get('login_required') or response.get('challenge') or response.get('http_status')==401 or response.get('error_code') in ('LOGIN_REQUIRED','KALODATA_LOGIN_REQUIRED'):self.logged_in=False
                 self.future.set_result(response)
