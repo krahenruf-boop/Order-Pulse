@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import json
 import threading
 from copy import deepcopy
 
@@ -149,6 +150,26 @@ class OperationsSpaceBinding:
         bindings[OPERATIONS_PURPOSE]=clean
         self.repo.set(KEY,bindings)
         return clean
+
+    def record_space(self,expected,browser):
+        """Persist verified session-ID recovery without overwriting changed settings."""
+        expected=self.validate(expected)
+        if (not isinstance(browser,dict) or type(browser.get('space_id')) is not int or browser['space_id']<0 or
+            browser.get('space_name')!=expected['expected_name'] or
+            browser.get('profile_id')!=expected['profile_id'] or browser.get('profile_name')!=expected['profile_name']):
+            raise ValueError('素材与客单价空间身份不一致')
+        recovered=dict(expected,space_id=browser['space_id'])
+        with self.repo.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT value FROM settings WHERE key=?',(KEY,)).fetchone()
+            bindings=json.loads(row[0]) if row else {}
+            current=bindings.get(OPERATIONS_PURPOSE)
+            # Another verified lookup may already have recorded this exact recovery.
+            if current not in (expected,recovered):raise ValueError('浏览器绑定已更改，请重新检查')
+            if current!=recovered:
+                bindings[OPERATIONS_PURPOSE]=recovered
+                db.execute('UPDATE settings SET value=? WHERE key=?',(json.dumps(bindings,ensure_ascii=False),KEY))
+        return recovered
 
     def state(self):
         value=self.get()

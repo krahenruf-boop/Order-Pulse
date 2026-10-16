@@ -1,8 +1,12 @@
 // Only the saved identity may be claimed. Idle maintenance never reads a page.
 const entries = await listTaskSpaces();
 const b = INPUT.binding;
-const entry = entries.find(e => e.id === b.space_id && e.name === b.expected_name &&
+// Numeric IDs are session-local. Require the saved logical identity to be unique;
+// never follow an old ID that was reassigned to a different Space after restart.
+const matches = entries.filter(e => e.name === b.expected_name &&
   e.profileId === b.profile_id && e.profileName === b.profile_name);
+const candidate = matches.length === 1 ? matches[0] : null;
+const entry = candidate && (candidate.id === b.space_id || candidate.taskId === b.expected_name) ? candidate : null;
 let result = {state:'BINDING_REQUIRED'};
 if (entry && b.auto_takeover === true) {
   if (entry.ownership === 'agent') result = {state:'CONTROLLED'};
@@ -23,4 +27,7 @@ if (entry && b.auto_takeover === true) {
     }
   } else result = {state:'UNAVAILABLE'};
 }
+if (entry && ['CONTROLLED','USER_ACTIVE'].includes(result.state)) result.browser = {
+  space_id:entry.id, space_name:entry.name, profile_id:entry.profileId, profile_name:entry.profileName
+};
 console.log('ORDER_PULSE_CONTROL:' + JSON.stringify(result));

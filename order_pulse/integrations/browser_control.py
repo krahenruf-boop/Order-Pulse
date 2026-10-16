@@ -24,6 +24,10 @@ class BrowserControl:
                 idle_script=str(Path(__file__).with_name('input_idle.py'))),
                 'ORDER_PULSE_CONTROL:', timeout=10)
             state = result.get('state', 'UNAVAILABLE')
+            if binding['purpose'] == 'material_aov' and result.get('browser'):
+                self.operations.record_space(binding, result['browser'])
+        except ValueError:
+            state = 'BINDING_REQUIRED'
         except EgoRuntimeError:
             state = 'UNAVAILABLE'
         self.states[binding['purpose']] = state

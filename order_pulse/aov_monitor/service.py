@@ -137,7 +137,7 @@ class Monitor:
         # Fast retries belong only to an unfinished task waiting for TMS.
         # Idle / user-login waits sleep until the next configured collection slot.
         pending=self.store.pending()
-        if self.worker and not self.worker.done() or pending and pending[1].get('phase') in {'TMS_PAGE_REQUIRED','WAITING_CONNECTION'}:
+        if self.worker and not self.worker.done() or pending and pending[1].get('phase') in {'TMS_PAGE_REQUIRED','WAITING_CONNECTION','BROWSER_BINDING_REQUIRED'}:
             return 20
         c=self.store.config()
         if not c['enabled']:return 2*60*60
@@ -157,8 +157,10 @@ class Monitor:
                     pending[1].update(finalize_only=True,halt_error='CYCLE_EXPIRED')
                     self.worker=asyncio.create_task(run_cards(self,*pending))
                     await asyncio.sleep(self.scheduler_delay());continue
-                from ..browser import blocking
-                readiness=await blocking(self.source.readiness) if hasattr(self.source,'readiness') else {'ready':await blocking(self.source.available),'error':'WAITING_USER'}
+                from .card_service import browser_batch
+                # This is an unfinished authorized task, so it may reclaim its
+                # uniquely verified Space after restart. Idle scheduling never does.
+                readiness=await browser_batch(self,self.source.readiness) if hasattr(self.source,'readiness') else {'ready':await browser_batch(self,self.source.available),'error':'WAITING_USER'}
                 if readiness['ready']:
                     c=self.store.config();hours=cycle_hours(c) if is_cycle(c) or is_incremental(c) else 2
                     if self.store.skip_unstarted(*pending,slot_at(self.clock(),hours)):

@@ -91,7 +91,11 @@ class DualSource:
             checked_at=contract.get('checked_at'),details=contract.get('details',[]))
     def resolve(self,shared):
         script='const s='+json.dumps(dict(shared,task_active=getattr(self._control,'active',False)))+''';
-const entries=await listTaskSpaces();const e=entries.find(e=>e.id===s.space_id&&e.name===s.expected_name&&e.profileId===s.profile_id&&e.profileName===s.profile_name);
+const entries=await listTaskSpaces();
+const matches=entries.filter(e=>e.name===s.expected_name&&e.profileId===s.profile_id&&e.profileName===s.profile_name);
+const candidate=matches.length===1?matches[0]:null;
+const e=candidate&&(candidate.id===s.space_id||candidate.taskId===s.expected_name)?candidate:null;
+let browser;
 let result;
 if(!e)result={error:'BROWSER_BINDING_REQUIRED'};
 else {
@@ -103,12 +107,13 @@ else {
  } else result={error:'WAITING_USER'};
  if(!result&&task.spaceId!==e.id)result={error:'BROWSER_BINDING_REQUIRED'};
  if(!result) {
+ browser={space_id:e.id,space_name:e.name,profile_id:e.profileId,profile_name:e.profileName};
  const all=await task.tabs(),tabs=all.filter(t=>t.url.startsWith('https://tms.mabangerp.com/#/myorder'));
  if(tabs.length!==1)result={error:all.some(t=>t.url.startsWith('https://tms.mabangerp.com/#/login'))?'AUTH_REQUIRED':'TMS_PAGE_REQUIRED'};
  else {const p=tabs[0].label?task.page(tabs[0].label):await task.adopt(tabs[0].page);result={space_id:e.id,page_label:p.label};}
  }
 }
-console.log('AOV_BINDING:'+JSON.stringify(result));
+console.log('AOV_BINDING:'+JSON.stringify({...result,...(browser?{browser}:{})}));
 '''
         try:p=subprocess.run([str(Path.home()/'.local/bin/ego-browser'),'nodejs'],input=script,text=True,capture_output=True,timeout=15)
         except subprocess.TimeoutExpired as exc:
@@ -119,6 +124,12 @@ console.log('AOV_BINDING:'+JSON.stringify(result));
         if p.returncode or len(lines)!=1:
             raise ValueError('WAITING_CONNECTION')
         value=json.loads(lines[0])
+        browser=value.pop('browser',None)
+        if self.host is not None:
+            if browser:
+                try:self.host.browser_space.record_space(shared,browser)
+                except ValueError:raise ValueError('BROWSER_BINDING_REQUIRED') from None
+            elif not value.get('error'):raise ValueError('BROWSER_BINDING_REQUIRED')
         if value.get('error'):raise ValueError(value['error'])
         return value
     def collect(self,config,start,end):

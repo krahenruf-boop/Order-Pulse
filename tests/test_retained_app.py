@@ -40,7 +40,9 @@ const takeOverTaskSpace=async()=>{calls.push('takeover');return task};
 '''
     p=real_run(['node','--input-type=module'],input=harness+captured[-1]+"\nconsole.log(JSON.stringify(calls));",text=True,capture_output=True,check=True)
     lines=[line for line in p.stdout.splitlines() if not line.startswith('AOV_CONTROL:')]
-    self.assertEqual(json.loads(lines[0].removeprefix('AOV_BINDING:')),expected)
+    result=json.loads(lines[0].removeprefix('AOV_BINDING:'))
+    result.pop('browser',None)
+    self.assertEqual(result,expected)
     self.assertEqual(json.loads(lines[1]),calls)
  def test_removed_routes_and_tables_stay_absent(self):
   with tempfile.TemporaryDirectory() as d:

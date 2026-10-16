@@ -72,13 +72,33 @@ class PausedMonitorTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(m.scheduler_delay(),20)
   m.store.context(rid,dict(card_run=True,phase='WAITING_CONNECTION'))
   self.assertEqual(m.scheduler_delay(),20)
-  for phase in ('WAITING_USER','AUTH_REQUIRED','BROWSER_BINDING_REQUIRED'):
+  m.store.context(rid,dict(card_run=True,phase='BROWSER_BINDING_REQUIRED'))
+  self.assertEqual(m.scheduler_delay(),20)
+  for phase in ('WAITING_USER','AUTH_REQUIRED'):
    m.store.context(rid,dict(card_run=True,phase=phase))
    self.assertEqual(m.scheduler_delay(),7200)
   m.worker=asyncio.create_task(asyncio.sleep(0))
   self.assertEqual(m.scheduler_delay(),20)
   await m.worker
   self.assertEqual(m.scheduler_delay(),7200)
+
+ async def test_pending_restart_readiness_is_an_authorized_task_and_keeps_run_id(self):
+  source=self.source();active=[]
+  def runner(fn,*args):
+   active.append(True)
+   try:return fn(*args)
+   finally:active.pop()
+  def readiness():
+   self.assertEqual(active,[True]);return {'ready':True}
+  source.run_browser_task=runner;source.readiness=readiness
+  m=Monitor(self.host,source=source,rates=SimpleNamespace(get=lambda *a:{}),clock=lambda:fixture.AT)
+  rid=m.store.start(None,dict(card_run=True,cutoff=fixture.AT.isoformat(),start=(fixture.AT-fixture.timedelta(days=6)).isoformat(),phase='BROWSER_BINDING_REQUIRED'))
+  async def stop_after_wait(seconds):m.stopping=True
+  with patch('order_pulse.aov_monitor.service.asyncio.sleep',side_effect=stop_after_wait):await m.scheduler()
+  self.assertIsNotNone(m.worker)
+  m.stopping=False
+  await m.worker
+  self.assertEqual(m.store.snapshot()['run_id'],rid)
 
  async def test_idle_scheduler_sleeps_without_browser_readiness(self):
   from unittest.mock import Mock
