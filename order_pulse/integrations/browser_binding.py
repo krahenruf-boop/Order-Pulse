@@ -6,12 +6,12 @@ import json
 import threading
 from copy import deepcopy
 
-from .ego_runtime import validate_target
+from .ego_runtime import BALANCE_SPACE_NAMES, validate_target
 
 
 KEY = "browser_bindings"
 PURPOSE = "balance_kalodata"
-DEDICATED_SPACE_NAME = "Order Pulse · Balance + Kalodata"
+DEDICATED_SPACE_NAME = BALANCE_SPACE_NAMES[0]
 
 
 def _label(value, *, optional=False):
@@ -28,8 +28,8 @@ def validate_binding(value):
     required={"space_id","expected_name","profile_id","profile_name","purpose","auto_takeover","tabs"}
     if set(value)!=required or type(value.get("space_id")) is not int or value["space_id"]<0:
         raise ValueError("专用浏览器绑定无效")
-    if value["expected_name"]!=DEDICATED_SPACE_NAME or value["purpose"]!=PURPOSE or value["auto_takeover"] is not True:
-        raise ValueError("专用浏览器只能绑定 Order Pulse · Balance + Kalodata")
+    if value["expected_name"] not in BALANCE_SPACE_NAMES or value["purpose"]!=PURPOSE or value["auto_takeover"] is not True:
+        raise ValueError("专用浏览器只能绑定 Order Pulse 余额监控空间")
     for key in ("profile_id","profile_name"):
         if not isinstance(value[key],str) or not value[key] or len(value[key])>100:
             raise ValueError("专用浏览器身份无效")
@@ -41,7 +41,7 @@ def validate_binding(value):
     if kalodata is not None and kalodata==balance:
         raise ValueError("余额与素材页面必须使用不同标签页")
     return {
-        "space_id":value["space_id"],"expected_name":DEDICATED_SPACE_NAME,
+        "space_id":value["space_id"],"expected_name":value["expected_name"],
         "profile_id":value["profile_id"],"profile_name":value["profile_name"],
         "purpose":PURPOSE,"auto_takeover":True,
         "tabs":{"balance_tab":balance,"kalodata_tab":kalodata},

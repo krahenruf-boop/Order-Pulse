@@ -31,7 +31,7 @@ def default_settings():
                 max_retries=2, paused=True, setup_complete=False,
                 schedules=[dict(id=uuid.uuid4().hex, time=t, enabled=False) for t in ['09:00', '14:00', '20:00']],
                 fields=list(VARIABLES), templates=dict(DEFAULT_TEMPLATES), amount_format='decimal', keyword='',
-                browser_mode='ego_lite', cdp_url='http://127.0.0.1:9222', expected_profile='Order Pulse · Balance + Kalodata',
+                browser_mode='ego_lite', cdp_url='http://127.0.0.1:9222', expected_profile='Order Pulse · 余额监控',
                 account_scope_confirmed=False)
 
 

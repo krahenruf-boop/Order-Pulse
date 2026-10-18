@@ -267,7 +267,11 @@ try {
     // the observed URL inside the verified Space before evaluating any page code.
     let tab=tabs.find(t=>t.label===spec.page_label&&isLinkmeTab(t));
     if(!tab){const matches=tabs.filter(isLinkmeTab);if(matches.length===1)tab=matches[0];}
-    if(!tab) result={ok:false,error_code:'WAITING_CONNECTION',error:'专用 Space 中未找到唯一的 Linkme 账户页面'};
+    if(!tab) {
+      const login=tabs.some(t=>{try{const u=new URL(t.url);return u.origin==='https://tt.linkme.live'&&u.pathname.replace(/\/$/,'')==='/login';}catch{return false;}});
+      result=login ? {ok:false,error_code:'AUTH_REQUIRED',error:'Linkme 登录已过期，请在余额监控空间重新登录'} :
+        {ok:false,error_code:'WAITING_CONNECTION',error:'专用 Space 中未找到唯一的 Linkme 账户页面'};
+    }
     else {
       const options=tabs.some(t=>t.label===spec.page_label)?{}:{as:spec.page_label};
       const page=tab.label?tab.page:await task.adopt(tab.page,options);

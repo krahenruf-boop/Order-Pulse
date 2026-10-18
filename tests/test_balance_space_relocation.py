@@ -3,12 +3,42 @@ import unittest
 from unittest.mock import patch
 from order_pulse.storage import Repository
 from order_pulse.balance.store import Store
-from order_pulse.balance.bridge import BrowserBridge
+from order_pulse.balance.bridge import BrowserBridge, BalanceBrowserError
+from order_pulse.balance.module import BalanceModule
 from order_pulse.integrations.browser_binding import BrowserSpaceBinding
 from order_pulse.integrations.ego_runtime import validate_target
 from tests.test_browser_space_binding import binding
 
 class SpaceRelocationTests(unittest.TestCase):
+    def test_chinese_balance_name_persists_without_rewriting_legacy_binding(self):
+        for name in ('Order Pulse · 余额监控', binding()['expected_name']):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as d:
+                manager=BrowserSpaceBinding(Repository(d))
+                saved=manager.save(dict(binding(1),expected_name=name))
+                restored=BrowserSpaceBinding(Repository(d))
+                self.assertEqual(restored.get(),saved)
+                self.assertEqual(restored.target('balance')['space_name'],name)
+                module=BalanceModule(d,None)
+                self.assertEqual(module.store.settings()['expected_profile'],'Order Pulse · 余额监控')
+                module.store.close()
+
+    def test_login_and_binding_errors_are_distinct_and_preserve_cached_balance(self):
+        with tempfile.TemporaryDirectory() as d:
+            store=Store(d);manager=BrowserSpaceBinding(Repository(d))
+            manager.save(dict(binding(1),expected_name='Order Pulse · 余额监控'))
+            store.set('browser_target',manager.target('balance'))
+            store.set('browser_last_seen','2026-10-16T11:37:13+00:00')
+            bridge=BrowserBridge(store,browser_binding=manager)
+            before=store.accounts()
+            for code,expected in [('AUTH_REQUIRED','登录'),('BOUND_SPACE_MISSING','绑定'),('WAITING_BROWSER','接管')]:
+                with self.subTest(code=code),patch('order_pulse.balance.bridge.execute',return_value={'ok':False,'error_code':code}):
+                    with self.assertRaises(BalanceBrowserError) as raised:bridge._read_source('collect')
+                    self.assertEqual(raised.exception.code,code)
+                    self.assertIn(expected,str(raised.exception))
+                self.assertEqual(store.accounts(),before)
+                self.assertEqual(store.get('browser_last_seen'),'2026-10-16T11:37:13+00:00')
+            store.close()
+
     def test_zero_is_valid_but_negative_and_boolean_ids_are_not(self):
         with tempfile.TemporaryDirectory() as d:
             manager=BrowserSpaceBinding(Repository(d));manager.save(binding(0))

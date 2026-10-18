@@ -10,6 +10,7 @@ from .engine import Engine, account_values
 from .store import Store, validate_account, validate_settings
 from .templates import VARIABLES, render_template
 from ..feishu import split_messages, validate_webhook
+from ..integrations.ego_runtime import BALANCE_SPACE_NAMES
 
 
 class ScopedSecrets:
@@ -43,10 +44,10 @@ class BalanceModule:
     def __init__(self,root,credentials,browser_lock=None,browser_binding=None):
         self.store=Store(root)
         current=self.store.settings()
-        if current.get('browser_mode')!='ego_lite' or current.get('expected_profile')!='Order Pulse · Balance + Kalodata':
+        if current.get('browser_mode')!='ego_lite' or current.get('expected_profile') not in BALANCE_SPACE_NAMES:
             # Module-local compatibility migration.  Preserve every business and
             # scheduler value while replacing the retired extension transport.
-            current=dict(current,browser_mode='ego_lite',expected_profile='Order Pulse · Balance + Kalodata')
+            current=dict(current,browser_mode='ego_lite',expected_profile=BALANCE_SPACE_NAMES[0])
             self.store.set('settings',current)
         self.feishu=ScopedSecrets(credentials,'feishu')
         self.bridge=BrowserBridge(self.store,browser_lock=browser_lock,browser_binding=browser_binding)
@@ -117,7 +118,7 @@ class BalanceModule:
     async def action(self,name):
         settings=self.store.settings()
         if name in ('query','push'):
-            if not self.bridge.target:raise ValueError('请先绑定 Order Pulse Balance + Kalodata 专用Space中的 Linkme页面')
+            if not self.bridge.target:raise ValueError('请先绑定余额监控专用空间中的 Linkme 页面')
             if name=='push' and not self.feishu.status()['webhook_configured']:raise ValueError('请先配置余额飞书机器人')
             accepted=self.engine.request(name,summary=name=='push')
             return {'message':'正在采集；本轮成功后发送余额汇总' if name=='push' else '正在采集余额',
@@ -126,7 +127,7 @@ class BalanceModule:
             if name=='resume':
                 if not settings['setup_complete']:raise ValueError('请先完成余额配置')
                 if not self.feishu.status()['webhook_configured']:raise ValueError('请先配置余额飞书机器人')
-                if not self.bridge.target:raise ValueError('请先绑定 Order Pulse Balance + Kalodata 专用Space中的 Linkme页面')
+                if not self.bridge.target:raise ValueError('请先绑定余额监控专用空间中的 Linkme 页面')
             settings['paused']=name=='pause';self.store.set('settings',settings)
             if name=='resume':self.store.set('last_detection',None)
             self.store.log('service','余额自动任务已暂停' if name=='pause' else '余额自动任务已恢复')

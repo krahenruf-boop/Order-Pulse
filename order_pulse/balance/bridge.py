@@ -11,6 +11,12 @@ from .json_parser import parse_json_accounts
 from .store import now_iso
 
 
+class BalanceBrowserError(ValueError):
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(message)
+
+
 class BrowserBridge:
     """Read Linkme's verified JSON contract through an existing ego-lite page.
 
@@ -22,7 +28,7 @@ class BrowserBridge:
         self.store = store
         self.target = store.get("browser_target")
         self.last_seen = store.get("browser_last_seen")
-        self.message = "请在 Order Pulse Balance + Kalodata 专用Space中打开并登录 Linkme资产列表"
+        self.message = "请在余额监控专用空间中打开并登录 Linkme 资产列表"
         self._busy = False
         self.return_to_workbench = None
         self._browser_lock = browser_lock
@@ -64,7 +70,7 @@ class BrowserBridge:
 
     def _read_source(self, action):
         if not self.target:
-            raise ValueError("请先绑定 Order Pulse Balance + Kalodata 专用Space中的 Linkme页面")
+            raise ValueError("请先绑定余额监控专用空间中的 Linkme 页面")
         target = validate_target(self.target)
         spec = dict(target, job={
             "action": action,
@@ -95,12 +101,14 @@ class BrowserBridge:
             code = reply.get("error_code")
             if code == "WAITING_USER":
                 raise ValueError("专用浏览器正在被用户操作；余额任务将等待")
-            if code in ("WAITING_BROWSER", "BOUND_SPACE_MISSING"):
-                raise ValueError("专用浏览器暂不可接管；已有余额保留")
+            if code == "WAITING_BROWSER":
+                raise BalanceBrowserError(code, "余额监控空间暂不可接管，请检查浏览器连接；已有余额保留")
+            if code == "BOUND_SPACE_MISSING":
+                raise BalanceBrowserError(code, "未找到与已保存名称和身份一致的余额监控空间，请检查空间绑定；已有余额保留")
             if code == "SPACE_MISMATCH":
                 raise ValueError("ego lite Space 身份与余额模块保存的绑定不一致")
-            if status in (401, 403):
-                raise ValueError("Linkme 登录或读取权限已失效，请在 Order Pulse 专用Space中重新登录")
+            if code == "AUTH_REQUIRED" or status in (401, 403):
+                raise BalanceBrowserError("AUTH_REQUIRED", "Linkme 登录或读取权限已失效，请在余额监控空间完成登录和验证码；已有余额保留")
             message = reply.get("error")
             raise ValueError(message[:1000] if isinstance(message, str) and message else "ego lite 余额读取失败")
         self.last_seen = now_iso()

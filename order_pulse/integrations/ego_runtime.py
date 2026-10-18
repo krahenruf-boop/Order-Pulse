@@ -11,6 +11,8 @@ import os
 import subprocess
 from pathlib import Path
 
+BALANCE_SPACE_NAMES = ("Order Pulse · 余额监控", "Order Pulse · Balance + Kalodata")
+
 
 class EgoRuntimeError(Exception):
     def __init__(self, code: str, details: dict | None = None):
@@ -61,8 +63,8 @@ def validate_target(value: object, *, require_page: bool = True) -> dict:
     allowed = required | {"expected_profile_id", "expected_profile_name", "purpose", "auto_takeover"}
     if not required <= set(value) or set(value) - allowed or type(value.get("space_id")) is not int or value["space_id"] < 0:
         raise ValueError("浏览器绑定无效")
-    if value.get("space_name") != "Order Pulse · Balance + Kalodata":
-        raise ValueError("只能使用已绑定的 Order Pulse Balance + Kalodata 专用Space")
+    if value.get("space_name") not in BALANCE_SPACE_NAMES:
+        raise ValueError("只能使用已绑定的 Order Pulse 余额监控专用空间")
     label = value.get("page_label")
     if require_page and (not isinstance(label, str) or not label.startswith("p") or not label[1:].isdigit()):
         raise ValueError("浏览器页面绑定无效")

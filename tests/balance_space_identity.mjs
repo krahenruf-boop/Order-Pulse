@@ -40,3 +40,17 @@ for(const ownership of ['user','agentDelegatedToUser']) {
 }
 r=await run([dedicated(0)]);assert.equal(r.calls.some(c=>c[0]==='handOff'),false,'keep existing Codex control');
 console.log('PASS: dedicated Balance keeps control on success/failure; takeover authorization and space identity still enforced');
+
+const renamed='Order Pulse · 余额监控';
+const renamedInput={...spec,space_name:renamed};
+const renamedEntry=dedicated(1,{name:renamed,taskId:renamed,ownership:'agentDelegatedToUser'});
+r=await run([renamedEntry],{input:renamedInput,returnedId:1});
+assert.equal(r.result.ok,true);assert.equal(r.result.browser.space_name,renamed);
+assert.deepEqual(r.calls[0],['takeOver',1]);
+r=await run([renamedEntry],{input:spec,returnedId:1});
+assert.equal(r.result.error_code,'BOUND_SPACE_MISSING');assert.equal(r.calls.length,0,'renaming still requires updating the explicit saved binding');
+r=await run([renamedEntry],{input:renamedInput,returnedId:1,tabs:[{url:'https://tt.linkme.live/login'}]});
+assert.equal(r.result.error_code,'AUTH_REQUIRED');assert.equal(r.evaluated.length,0,'expired login must never evaluate the account collector');
+r=await run([renamedEntry],{input:renamedInput,returnedId:1,tabs:[{url:'https://example.org/login'}]});
+assert.equal(r.result.error_code,'WAITING_CONNECTION');
+console.log('PASS: explicit renamed binding, no implicit name following, and Linkme login expiry diagnosis');
