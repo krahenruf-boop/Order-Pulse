@@ -11,6 +11,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 from .store import now_iso, parse_time, SOURCE
 from .templates import render_template, format_amount
+from .health import CollectionHealth, KINDS as HEALTH_KINDS
 from ..feishu import FeishuClient, split_messages
 
 STATUS_LABELS={'valid':'有效','stale':'过期','missing':'本次未获取到','failed':'本次采集失败，显示上次成功值','sample':'参考文件样本，非实时','unknown':'未确认'}
@@ -71,6 +72,7 @@ class Engine:
         self.store=store;self.bridge=bridge;self.secrets=secrets
         self.cycle=None;self.intents=None;self.stopped=False
         self.dispatch_lock=None;self.scheduler_task=None
+        self.health=CollectionHealth(store)
 
     def status(self):
         collection=self.store.get('collection',{})
@@ -81,10 +83,16 @@ class Engine:
         problems=[a['data_status'] for a in accounts if a['enabled'] and a['data_status']!='valid']
         data_status=('failed' if collection.get('status')=='failed' else
                      (problems[0] if problems else ('valid' if valid else (accounts[0]['data_status'] if accounts else 'unknown'))))
+        health=self.health.status()
+        if health['active']:data_status='failed'
+        now=datetime.now(timezone.utc)
+        last_detection=parse_time(self.store.get('last_detection'))
+        next_check=max(now,last_detection+timedelta(minutes=settings['interval_minutes'])) if last_detection else now
+        if settings['paused'] or not settings['setup_complete']:next_check=None
         return dict(busy=bool((self.cycle and not self.cycle.done()) or getattr(self.bridge,'job',None)),paused=settings['paused'],
-                    last_success=self.store.get('last_success'),last_error=self.store.get('cleanup_error') or self.store.get('last_error'),
+                    last_success=self.store.get('last_success'),last_error=self.store.get('cleanup_error') or self.store.get('last_error') or (health['error'] or '已超过 6 小时没有成功采集余额，请检查连接和授权' if health['active'] else None),
                     next_send=next_slot(settings),source_updated_at=source,refresh_mode=collection.get('refresh_mode'),
-                    data_status=data_status,
+                    data_status=data_status,monitor_health=health,next_check=next_check.isoformat() if next_check else None,
                     export_cooldown_seconds=self.bridge.cooldown_remaining() if hasattr(self.bridge,'cooldown_remaining') else 0,
                     last_collection=collection,parse_count=collection.get('parse_count',0))
 
@@ -117,6 +125,7 @@ class Engine:
             previous=self.store.get('collection',{})
             self.store.set('collection',dict(meta,status='success',parse_count=len(result['accounts']),task_id=task_id,started_at=started,ended_at=now_iso()))
             self.store.set('last_success',meta['collected_at']);self.store.set('last_error',None)
+            self.health.success()
             self.store.log('collection','余额采集成功',task_id=task_id,parse_count=len(result['accounts']),
                            source_updated_at=meta['source_updated_at'],refresh_mode=meta['refresh_mode'],
                            page_count=evidence['page_count'],data_source=evidence.get('data_source','xlsx'),request_count=evidence.get('request_count'),warnings=result['warnings'],
@@ -147,12 +156,19 @@ class Engine:
             self.store.set('collection',dict(previous,**dict(status='failed',error=message,task_id=task_id,**diagnostics)))
             self.store.set('last_error',message)
             self.store.log('collection',message,level='error',task_id=task_id,status='FAILED',**diagnostics)
+            self.health.failure(message,code)
             if (intents['alerts'] or intents['summary']) and ('push' in intents['triggers'] or not self.store.settings()['paused']):self.incident('collection',message)
         finally:
             if intents['alerts']:self.store.set('last_detection',now_iso())
         # Raw XLSX has already been released before any network message is sent.
         # A failed collection must neither notify nor flush older queued balances.
         if collection_succeeded and (intents['alerts'] or intents['summary']):await self.dispatch()
+        else:await self.dispatch(health_only=True)
+
+    async def health_tick(self):
+        # Runs independently of browser collection and cannot flush stale balances.
+        self.health.poll()
+        await self.dispatch(health_only=True)
 
     def evaluate_alerts(self):
         current={(a['source'],a['asset_id']):a for a in self.store.accounts()}
@@ -204,6 +220,7 @@ class Engine:
     def valid_event(self,event):
         p=event['payload'];settings=self.store.settings();kind=event['kind']
         if p.get('expires_at') and parse_time(p['expires_at'])<datetime.now(timezone.utc):return False
+        if kind in HEALTH_KINDS:return self.health.valid(event)
         if p.get('settings_revision',0)!=self.store.get('settings_revision',0):return False
         if kind in ('alert','recovery'):
             if settings['paused']:return False
@@ -223,6 +240,9 @@ class Engine:
         return kind=='test'
 
     def messages(self,event,settings=None):
+        if event['kind'] in HEALTH_KINDS:
+            settings=settings or self.store.settings()
+            return split_messages([self.health.message(event,settings['timezone'])],'',event['id'],settings['keyword'])
         if event['kind'] not in ('summary','alert','recovery','test'):return []
         settings=settings or self.store.settings();p=event['payload'];kind=event['kind'];eid=event['id'];fields=settings['fields'];tpl=settings['templates']
         rows=self.store.accounts()
@@ -244,17 +264,20 @@ class Engine:
         elif kind=='test':body='Order Pulse 余额飞书连接测试\n这是一条测试消息，不包含账户余额。'
         return split_messages([body],'',eid,settings['keyword'])
 
-    async def dispatch(self):
+    async def dispatch(self, *, health_only=False):
         if self.dispatch_lock is None:self.dispatch_lock=asyncio.Lock()
         if self.dispatch_lock.locked():return
         async with self.dispatch_lock:
             for event in self.store.pending_events():
+                if health_only and event['kind'] not in HEALTH_KINDS:continue
                 if event['status']!='pending':continue
                 if not self.valid_event(event):
                     self.store.update_event(event['id'],'cancelled','通知已失效，取消旧通知');continue
                 credentials=self.secrets.get()
                 if not credentials.get('webhook'):
-                    self.store.update_event(event['id'],'failed','未配置飞书 Webhook');self.store.set('feishu_failure','未配置飞书 Webhook');continue
+                    self.store.update_event(event['id'],'failed','未配置飞书 Webhook');self.store.set('feishu_failure','未配置飞书 Webhook')
+                    if event['kind'] in HEALTH_KINDS:self.health.delivery(event,'failed')
+                    continue
                 try:
                     messages=self.messages(event)
                     if not messages:
@@ -273,6 +296,7 @@ class Engine:
                     if outcome['status']!='success' and succeeded:
                         outcome['reason']=f'已成功发送 {succeeded}/{len(messages)} 条；'+outcome['reason']
                     self.store.update_event(event['id'],outcome['status'],outcome['reason'],attempts,payload=p)
+                    if event['kind'] in HEALTH_KINDS:self.health.delivery(event,outcome['status'])
                     if outcome['status']=='success':
                         self.store.set('feishu_success',now_iso());self.store.set('feishu_failure',None)
                     elif outcome['status']!='cancelled':self.store.set('feishu_failure',outcome['reason'])
@@ -281,6 +305,7 @@ class Engine:
                     reason=str(exc) if isinstance(exc,ValueError) else '消息生成或发送发生内部异常'
                     self.store.update_event(event['id'],'failed',reason);self.store.set('feishu_failure',reason)
                     self.store.log('notification',reason,level='error',event_id=event['id'])
+                    if event['kind'] in HEALTH_KINDS:self.health.delivery(event,'failed')
 
     async def scheduler(self):
         previous=self.store.get('heartbeat')

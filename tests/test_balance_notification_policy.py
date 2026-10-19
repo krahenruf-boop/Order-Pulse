@@ -74,12 +74,14 @@ class BalanceNotificationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('123.45',self.client.return_value.send.call_args.args[0])
         self.assertTrue(self.store.events(include_payload=True)[0]['payload']['manual'])
 
-    async def assert_failure_silent(self,message):
+    async def assert_failure_alerts_without_stale_balances(self,message):
         before=self.store.accounts()[0];last=self.store.get('last_success')
         self.bridge.collect.side_effect=ValueError(message)
         with patch('order_pulse.balance.engine.render_template',side_effect=AssertionError('must not render')):
             await self.cycle(summary=True,alerts=True,trigger='push')
-        self.client.assert_not_called();self.assertEqual(self.store.events(),[])
+        self.client.return_value.send.assert_awaited_once()
+        self.assertEqual({e['kind'] for e in self.store.events()},{'monitor_fault'})
+        self.assertNotIn(before['asset_id'],self.client.return_value.send.call_args.args[0])
         self.assertEqual(self.store.get('last_error'),message)
         self.assertEqual(self.store.get('last_success'),last)
         self.assertEqual(self.engine.status()['data_status'],'failed')
@@ -87,29 +89,30 @@ class BalanceNotificationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((after['cash_balance'],after['grant_balance']),(before['cash_balance'],before['grant_balance']))
         self.assertEqual(self.store.settings(),self.settings)
 
-    async def test_source_timeout_does_not_send(self):await self.assert_failure_silent('SOURCE_TIMEOUT')
-    async def test_http_520_does_not_send(self):await self.assert_failure_silent('HTTP 520')
-    async def test_auth_failure_does_not_send(self):await self.assert_failure_silent('AUTH_REQUIRED')
+    async def test_source_timeout_alerts(self):await self.assert_failure_alerts_without_stale_balances('SOURCE_TIMEOUT')
+    async def test_http_520_alerts(self):await self.assert_failure_alerts_without_stale_balances('HTTP 520')
+    async def test_auth_failure_alerts(self):await self.assert_failure_alerts_without_stale_balances('AUTH_REQUIRED')
 
-    async def test_unavailable_invalid_data_and_missing_pages_do_not_send(self):
+    async def test_different_failure_reasons_share_one_incident(self):
         for reason in ('SOURCE_UNAVAILABLE','HTTP_ERROR','DATA_INVALID','PAGINATION_FAILED','其他采集失败'):
-            with self.subTest(reason=reason):await self.assert_failure_silent(reason)
+            with self.subTest(reason=reason):await self.assert_failure_alerts_without_stale_balances(reason)
 
-    async def test_repeated_failed_cycles_are_silent_and_next_success_is_allowed(self):
+    async def test_repeated_failed_cycles_deduplicate_and_success_sends_recovery(self):
         self.bridge.collect.side_effect=ValueError('SOURCE_TIMEOUT')
         await self.cycle(summary=True,alerts=True);await self.cycle(summary=True,alerts=True)
-        self.client.assert_not_called();self.assertEqual(self.store.events(),[])
+        self.client.return_value.send.assert_awaited_once()
+        self.assertEqual(len(self.store.events()),1)
         failures=[x for x in self.store.logs() if x['level']=='error']
         self.assertEqual(len(failures),2);self.assertNotEqual(failures[0]['task_id'],failures[1]['task_id'])
         self.assertTrue(failures[0]['details']['retry'])
         self.assertFalse(failures[1]['details']['retry'])
         self.bridge.collect.side_effect=lambda:self.collection()
         await self.cycle(summary=True)
-        self.client.return_value.send.assert_awaited_once()
+        self.assertEqual(self.client.return_value.send.await_count,3) # fault, recovery, fresh summary
         self.assertEqual(self.store.settings(),self.settings)
 
     async def test_failure_history_remains_visible_with_diagnostics(self):
-        await self.assert_failure_silent('SOURCE_TIMEOUT')
+        await self.assert_failure_alerts_without_stale_balances('SOURCE_TIMEOUT')
         failure=next(x for x in self.store.logs() if x['level']=='error')
         for key in ('error_code','error_stage','safe_error_message','retry','elapsed_ms','started_at','ended_at'):
             self.assertIn(key,failure['details'])
@@ -136,8 +139,9 @@ class BalanceNotificationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.engine.queue_summary(manual=True)
         self.bridge.collect.side_effect=ValueError('SOURCE_TIMEOUT')
         await self.cycle(summary=True,trigger='push')
-        self.client.assert_not_called()
-        self.assertEqual(self.store.events()[0]['status'],'pending')
+        self.client.return_value.send.assert_awaited_once()
+        summary=next(e for e in self.store.events() if e['kind']=='summary')
+        self.assertEqual(summary['status'],'pending')
 
     def test_legacy_failure_template_is_ignored_and_active_templates_still_validated(self):
         settings=self.store.settings()

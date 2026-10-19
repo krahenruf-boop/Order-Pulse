@@ -50,6 +50,14 @@ class FeishuFormatTests(unittest.TestCase):
             split_messages(["中" * 7000], "标题", "event")
         self.assertEqual(split_messages([], "标题", "event"), [])
 
+    def test_untitled_alert_has_no_leading_blank_lines(self):
+        body='低余额预警\n94店 BomPreço\n当前值：BRL 3962.51'
+        for header in ('', '  \n  '):
+            message=split_messages([body],header,'alert-event')[0]
+            self.assertTrue(message.startswith('低余额预警\n'),repr(message))
+            self.assertEqual(message,body+'\n\n事件编号：alert-event')
+        self.assertTrue(split_messages([body],'余额汇总','alert-event')[0].startswith('余额汇总\n\n低余额预警'))
+
     def test_client_repr_redacts_credentials(self):
         client = FeishuClient(WEBHOOK, secret="very-private")
         self.assertNotIn("test-token", repr(client))

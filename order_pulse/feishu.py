@@ -88,7 +88,8 @@ def split_messages(blocks: list[str], header: str, event_id: str, keyword: str =
         prefix = header.strip()
         if total > 1:
             prefix = f"{prefix}\n第 {index}/{total} 条".strip()
-        return _decorate(prefix + "\n\n" + "\n\n".join(group), event_id, keyword)
+        content = "\n\n".join(part for part in (prefix, "\n\n".join(group)) if part)
+        return _decorate(content, event_id, keyword)
 
     groups: list[list[str]] = []
     group: list[str] = []

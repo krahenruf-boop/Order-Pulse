@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from .bridge import BrowserBridge
 from .engine import Engine, account_values
@@ -53,6 +53,7 @@ class BalanceModule:
         self.bridge=BrowserBridge(self.store,browser_lock=browser_lock,browser_binding=browser_binding)
         self.engine=Engine(self.store,self.bridge,self.feishu)
         self.started=False
+        self.health_worker=None
         self.migration_status='NOT_REQUIRED'
 
     async def startup(self):
@@ -64,8 +65,22 @@ class BalanceModule:
                     self.store.log('interruption','后台曾停止、休眠或中断，恢复后将先采集再处理到期任务',level='warning',previous_heartbeat=previous)
             except (TypeError,ValueError):pass
         self.started=True
+        self.health_worker=asyncio.create_task(self._watch_health())
+
+    async def _watch_health(self):
+        while self.started:
+            try:await self.engine.health_tick()
+            except asyncio.CancelledError:raise
+            except Exception:self.store.log('health','监控健康检查未完成，将自动重试',level='error')
+            if not self.started:return
+            await asyncio.sleep(60)
 
     async def shutdown(self):
+        self.started=False
+        if self.health_worker:
+            self.health_worker.cancel()
+            await asyncio.gather(self.health_worker,return_exceptions=True)
+            self.health_worker=None
         await self.engine.shutdown();self.store.close();self.started=False
 
     async def tick(self,now=None):
@@ -99,6 +114,7 @@ class BalanceModule:
                     db.execute('UPDATE balance_accounts SET data=? WHERE source=? AND asset_id=?',(json.dumps(data,ensure_ascii=False),row['source'],row['asset_id']))
         if merged['setup_complete'] and not old['setup_complete']:self.store.set('schedule_cursor',datetime.now(timezone.utc).isoformat())
         self.store.log('settings','余额设置已保存')
+        if merged['paused']!=old['paused']:self.engine.health.poll()
         return {'message':'余额设置已保存，立即生效'}
 
     def save_accounts(self,patches):
@@ -138,6 +154,11 @@ class BalanceModule:
         if name=='cancel':
             if self.engine.cycle and not self.engine.cycle.done():self.engine.cycle.cancel()
             return {'message':'已请求取消余额采集'}
+        if name=='test-health':
+            if not self.feishu.status()['webhook_configured']:raise ValueError('请先配置余额飞书机器人')
+            self.store.event('monitor_test',{'expires_at':(datetime.now(timezone.utc)+timedelta(minutes=30)).isoformat()})
+            await self.engine.dispatch(health_only=True)
+            return {'message':'故障报警测试已处理，请查看飞书和发送记录'}
         raise ValueError('余额操作不受支持')
 
     def bind_browser(self,payload):
