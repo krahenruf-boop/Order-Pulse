@@ -9,11 +9,11 @@ if (entry && entry.ownership === 'agent') {
   const task = await taskSpace(entry.id);
   const tabs = await task.tabs();
   const active = tabs.find(t => t.active);
-  const routes = b.purpose === 'balance_kalodata' ? ['#balance'] : ['#aov-monitor','#kalodata'];
+  const routes = b.purpose === 'balance_kalodata' ? ['#balance','#api-monitor'] : ['#aov-monitor','#kalodata'];
   const workbenches = tabs.filter(t => {
     try {
       const u = new URL(t.url);
-      return u.origin === 'http://127.0.0.1:8786' && u.pathname === '/' && !u.search && routes.includes(u.hash);
+      return u.origin === (INPUT.origin || 'http://127.0.0.1:8786') && u.pathname === '/' && !u.search && routes.includes(u.hash);
     } catch { return false; }
   });
   // Leave a login/challenge page visible when the site needs the user's help.

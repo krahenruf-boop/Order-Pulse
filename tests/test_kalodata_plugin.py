@@ -146,7 +146,7 @@ class PluginHealthTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(forbidden,source)
         host=(Path(__file__).parents[1]/'order_pulse/service.py').read_text()
         self.assertIn('browser_lock=self.balance_browser_space.lock',host)
-        self.assertIn('KalodataModule(root,self.repo,self.secrets)',host)
+        self.assertIn('KalodataModule(root,self.repo,self.secrets,production=production)',host)
 
     async def test_health_during_active_job_does_not_interleave_plugin_operations(self):
         module=KalodataModule(self.tmp.name,MainRepository(self.tmp.name),self.credentials)
@@ -282,10 +282,10 @@ class PluginJobTests(unittest.IsolatedAsyncioTestCase):
         self.plugin.gate.set();await self.finish()
     def test_ui_plugin_only_and_background_job_entry(self):
         root=Path(__file__).parents[1]
-        for name in ('static/kalodata-settings.js',):
+        for name in ('static/materials/kalodata-settings.js',):
             text=(root/name).read_text()
             for old in ('ego lite','ownership','takeOver','Space','检查本机通道状态','WAITING_USER','/browser-binding'):self.assertNotIn(old,text)
-        ui=(root/'static/modules/kalodata/module.js').read_text()
+        ui=(root/'static/materials/modules/kalodata/module.js').read_text()
         self.assertIn('打开 ego lite 当前采集浏览器',ui)
         self.assertIn('PLUGIN_RELOAD_REQUIRED',ui)
         self.assertIn("await api('/jobs',request)",ui)

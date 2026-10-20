@@ -7,7 +7,7 @@ from pathlib import Path
 from .tms_core.monitor_domain import stamp
 
 class Repository:
-    def __init__(self, root):
+    def __init__(self, root, role="legacy"):
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.root.chmod(0o700)
@@ -19,7 +19,7 @@ class Repository:
             if version not in (0, 1, 2, 3, 4):
                 raise ValueError('DATABASE_VERSION_UNSUPPORTED')
             # Retained modules share a database with separate namespaces.
-            db.executescript('''
+            schema='''
               BEGIN IMMEDIATE;
               CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
               CREATE TABLE IF NOT EXISTS product_catalog_versions (id TEXT PRIMARY KEY, status TEXT NOT NULL, created_at TEXT NOT NULL, payload TEXT NOT NULL);
@@ -84,7 +84,14 @@ class Repository:
               INSERT OR IGNORE INTO kalodata_schema_migrations(version,applied_at) VALUES(1,datetime('now'));
               PRAGMA user_version=4;
               COMMIT;
-            ''')
+            '''
+            if role != 'legacy':
+                statements=schema.split(';')
+                def keep(sql):
+                    if role=='finance':return not any(t in sql for t in ('kalodata_', 'legacy_migrations', 'product_catalog_versions'))
+                    return 'balance_' not in sql
+                schema=';'.join(sql for sql in statements if keep(sql))
+            db.executescript(schema)
         self.path.chmod(0o600)
 
     @contextmanager

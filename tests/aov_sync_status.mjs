@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {aovCardDataLabel,aovSyncProgress,aovRefundSummary} from '../static/aov-monitor.js';
+import {aovCardDataLabel,aovSyncProgress,aovRefundSummary} from '../static/materials/aov-monitor.js';
 assert.equal(aovCardDataLabel({status:'INCOMPLETE',updated_at:'2026-10-14T00:00:00Z',windows:{'24h':{}},errors:['AUTH_REQUIRED']}),'更新未完成');
 assert.equal(aovCardDataLabel({status:'INCOMPLETE',errors:['ORDER_FIELDS_UNVERIFIED']}),'字段待核验');
 assert.equal(aovCardDataLabel({status:'INCOMPLETE',errors:['SOURCE_NOT_READ']}),'采集未完成');

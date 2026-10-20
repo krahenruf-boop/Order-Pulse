@@ -1,8 +1,7 @@
-import {createBalance} from './balance.js';
 import {createKalodataSettings} from './kalodata-settings.js';
 import {createAovMonitor} from './aov-monitor.js';
 const $=s=>document.querySelector(s);
-const routes=['balance','kalodata','aov-monitor'];
+const routes=['kalodata','aov-monitor'];
 let csrf='',state,toastTimer,kalodataMount,kalodataLoad;
 const mounted=new Set();
 async function api(path,data){
@@ -10,15 +9,14 @@ async function api(path,data){
  const result=await r.json();if(!r.ok)throw Error(result.error||'操作未完成');return result;
 }
 function toast(text){$('#toast').textContent=text;$('#toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').hidden=true,4000)}
-const balance=createBalance({api,toast});
 const kalodataSettings=createKalodataSettings({api,toast});
 const aovMonitor=createAovMonitor({api,toast});
-function currentRoute(){const route=location.hash.slice(1);return routes.includes(route)?route:'balance'}
+function currentRoute(){const route=location.hash.slice(1);return routes.includes(route)?route:'aov-monitor'}
 function header(){
  const route=currentRoute(),module=state?.modules?.[route];
  const waiting=route==='kalodata'&&module?.status==='waiting_connection';
  $('#connection').className='status '+(waiting?'warning':'success');
- $('#connection').replaceChildren(document.createElement('i'),document.createTextNode(waiting?'等待采集插件':route==='balance'&&module?.paused?'余额监控已暂停':'后台运行中'));
+ $('#connection').replaceChildren(document.createElement('i'),document.createTextNode(waiting?'等待采集插件':'素材后台运行中'));
 }
 async function navigation(){
  const route=currentRoute();if(location.hash!=='#'+route)history.replaceState(null,'','#'+route);
@@ -27,11 +25,11 @@ async function navigation(){
  if(route==='kalodata'){
   if(!kalodataMount){kalodataLoad??=import('./modules/kalodata/module.js');try{const m=await kalodataLoad;if(!kalodataMount)kalodataMount=m.mountKalodata($('#kalodata-root'),{csrf:()=>csrf,toast})}catch(e){kalodataLoad=null;toast('素材情报载入失败，请刷新页面')}}
  }else{
-  const module=route==='balance'?balance:aovMonitor;
+  const module=aovMonitor;
   if(!mounted.has(route)){module.mount($('#'+route));mounted.add(route)}else await module.load();
  }
 }
-$('#settings-open').onclick=()=>{const r=currentRoute();return r==='balance'?balance.openSettings():r==='kalodata'?kalodataSettings.open():aovMonitor.openSettings()};
+$('#settings-open').onclick=()=>{const r=currentRoute();Promise.resolve(r==='kalodata'?kalodataSettings.open():aovMonitor.openSettings()).catch(e=>toast(e.message))};
 async function refresh(){state=await api('/state');csrf=state.csrf;header();$('#service-notice').hidden=true}
 try{await refresh();await navigation()}catch(e){$('#service-notice').hidden=false;$('#service-notice').textContent='后台暂不可连接，请启动 Order Pulse 后刷新。'}
 window.addEventListener('hashchange',()=>navigation().catch(e=>toast(e.message)));

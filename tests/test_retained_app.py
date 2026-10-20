@@ -45,22 +45,22 @@ const takeOverTaskSpace=async()=>{calls.push('takeover');return task};
     self.assertEqual(result,expected)
     self.assertEqual(json.loads(lines[1]),calls)
  def test_removed_routes_and_tables_stay_absent(self):
-  with tempfile.TemporaryDirectory() as d:
-   s=Service(d)
-   with TestClient(create_app(d,service=s),base_url='http://127.0.0.1:8786') as c:
-    csrf=c.get('/api/state').json()['csrf'];headers={'Origin':'http://127.0.0.1:8786','X-CSRF-Token':csrf}
-    for path in ['/api/query','/api/settings','/api/product-ranking/refresh','/api/distribution/generate']:
-     self.assertEqual(c.post(path,json={},headers=headers).status_code,404,path)
-    for path in ['/api/history','/api/unified-history/all','/api/product-ranking/state','/api/distribution/state']:
-     self.assertEqual(c.get(path).status_code,404,path)
-    for path in ['/api/balance/state','/api/kalodata/status','/api/aov-monitor/state']:
-     self.assertEqual(c.get(path).status_code,200,path)
-    page=c.get('/').text
-    for route in ['#dashboard','#product-ranking','#distribution','#history']:self.assertNotIn(route,page)
-    self.assertEqual(c.post('/api/credentials',json={}).status_code,403)
-   with s.repo.db() as db:tables={r[0] for r in db.execute("select name from sqlite_master where type='table'")}
-   self.assertFalse(tables & {'runs','orders','snapshots','daily_tasks','product_rank_runs','distribution_batches'})
-   self.assertIn('aov_monitor_orders',tables);self.assertIn('balance_accounts',tables);self.assertIn('kalodata_runs',tables)
+  for role,port,allowed,blocked in [('finance',8786,['balance/state','api-monitor/state'],['kalodata/status','aov-monitor/state']),('materials',8797,['kalodata/status','aov-monitor/state'],['balance/state','api-monitor/state'])]:
+   with tempfile.TemporaryDirectory() as d:
+    app=create_app(d,role=role,port=port);s=app.state.service
+    with TestClient(app,base_url=f'http://127.0.0.1:{port}') as c:
+     csrf=c.get('/api/state').json()['csrf'];headers={'Origin':f'http://127.0.0.1:{port}','X-CSRF-Token':csrf}
+     for path in ['/api/query','/api/settings','/api/product-ranking/refresh','/api/distribution/generate']:
+      self.assertEqual(c.post(path,json={},headers=headers).status_code,404,path)
+     for path in ['/api/history','/api/unified-history/all','/api/product-ranking/state','/api/distribution/state']:
+      self.assertEqual(c.get(path).status_code,404,path)
+     for path in allowed:self.assertEqual(c.get('/api/'+path).status_code,200,path)
+     for path in blocked:self.assertEqual(c.get('/api/'+path).status_code,404,path)
+     page=c.get('/').text
+     for route in ['#dashboard','#product-ranking','#distribution','#history']:self.assertNotIn(route,page)
+     self.assertEqual(c.post('/api/credentials',json={}).status_code,403)
+    with s.repo.db() as db:tables={r[0] for r in db.execute("select name from sqlite_master where type='table'")}
+    self.assertFalse(tables & {'runs','orders','snapshots','daily_tasks','product_rank_runs','distribution_batches'})
  def test_separate_space_persistence_and_mutex(self):
   with tempfile.TemporaryDirectory() as d:
    s=Service(d)

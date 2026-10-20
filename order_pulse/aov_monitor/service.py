@@ -59,6 +59,13 @@ class Monitor:
     async def startup(self):
         self.store.recover();self.stopping=False
         pending=self.store.pending()
+        if not pending and is_incremental(self.store.config()):
+            from .cleanup import cleanup
+            from ..browser import blocking
+            try:await blocking(cleanup,self.store,self.clock())
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning('客单价过期明细清理未完成，将在检测后重试')
         if pending and pending[1].get('card_run'):
             from .card_service import run_cards
             c=self.store.prepare(self.shops());hours=cycle_hours(c) if is_cycle(c) or is_incremental(c) else 2
@@ -95,6 +102,7 @@ class Monitor:
             if shop_ids and (automatic or not isinstance(shop_ids,list) or any(x not in {s['id'] for s in c['shops']} for x in shop_ids)):raise ValueError('店铺范围无效')
             if retry_id:
                 previous=self.store.snapshot(retry_id)
+                if any(j['status']=='COMPLETE' and j.get('result') is None for j in self.store.jobs(retry_id)):raise ValueError('该历史任务的临时明细已清理，请重新检测当前窗口')
                 if is_incremental(c) and previous and previous.get('collection_mode')!='ROLLING_INCREMENTAL':raise ValueError('旧口径记录仅供查看，请开始滚动增量检测')
                 if automatic or not previous or previous.get('status') not in ('INCOMPLETE','PARTIAL') :raise ValueError('该任务不可重试')
                 if is_cycle(c) and previous.get('collection_mode')!='CYCLE':raise ValueError('旧范围记录仅供查看，请开始当前周期检测')

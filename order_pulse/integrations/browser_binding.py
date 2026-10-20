@@ -28,7 +28,7 @@ def validate_binding(value):
     required={"space_id","expected_name","profile_id","profile_name","purpose","auto_takeover","tabs"}
     if set(value)!=required or type(value.get("space_id")) is not int or value["space_id"]<0:
         raise ValueError("专用浏览器绑定无效")
-    if value["expected_name"] not in BALANCE_SPACE_NAMES or value["purpose"]!=PURPOSE or value["auto_takeover"] is not True:
+    if (not isinstance(value["expected_name"],str) or not value["expected_name"].strip() or len(value["expected_name"])>150 or value["purpose"]!=PURPOSE or value["auto_takeover"] is not True):
         raise ValueError("专用浏览器只能绑定 Order Pulse 余额监控空间")
     for key in ("profile_id","profile_name"):
         if not isinstance(value[key],str) or not value[key] or len(value[key])>100:

@@ -158,7 +158,7 @@ class Store:
         with self.db() as db:
             count=db.execute('SELECT COUNT(*) FROM aov_monitor_orders WHERE run_id=? AND shop_id=?',(rid,shop_id)).fetchone()[0]
             rows=db.execute('SELECT payload FROM aov_monitor_orders WHERE run_id=? AND shop_id=? ORDER BY order_key LIMIT 50 OFFSET ?',(rid,shop_id,(page-1)*50)).fetchall()
-            return dict(total=count,page=page,items=[json.loads(r[0]) for r in rows])
+            return dict(total=count,page=page,items=[json.loads(r[0]) for r in rows],details_cleared=not count,message='历史统计结果保留；本次未保留订单明细，避免重复占用空间。' if not count else None)
     def alert_states(self):
         with self.db() as db:return {k:json.loads(v) for k,v in db.execute('SELECT key,payload FROM aov_monitor_alerts')}
     def events(self):

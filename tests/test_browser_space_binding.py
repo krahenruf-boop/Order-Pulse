@@ -60,10 +60,10 @@ class DedicatedBrowserBindingTests(unittest.TestCase):
             self.assertEqual(restored.target("kalodata")["page_label"], "p2")
             self.assertTrue(restored.target("balance")["auto_takeover"])
 
-    def test_wrong_name_and_tms_space_are_rejected(self):
+    def test_empty_name_and_tms_space_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = BrowserSpaceBinding(Repository(directory))
-            wrong = binding(); wrong["expected_name"] = "Creative Factory S3-A 单条搬运"
+            wrong = binding(); wrong["expected_name"] = ""
             with self.assertRaises(ValueError):
                 manager.save(wrong, tms_space_id=4)
             with self.assertRaises(ValueError):

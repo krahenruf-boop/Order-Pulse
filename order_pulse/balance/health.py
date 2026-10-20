@@ -168,6 +168,6 @@ class CollectionHealth:
             # Use the current reason if it changed while the same outage remained.
             lines.extend([f"原因：{self.state().get('error') or p['error']}",
                 '上次成功余额已保留，不代表当前实时余额；低余额判断等待有效数据。',
-                '请在「Order Pulse · 余额监控」检查 Linkme 登录和验证码。',
+                f"请在「{(self.store.get('browser_target') or {}).get('space_name','财务专用空间')}」检查 Linkme 登录和验证码。",
                 'https://tt.linkme.live/client/dashboard'])
         return '\n'.join(lines)

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {aovVisibleProducts} from '../static/aov-monitor.js';
+import {aovVisibleProducts} from '../static/materials/aov-monitor.js';
 const metric={current_count:12,aov_rmb:'51.47'};
 const card={windows:{'24h':metric},products:[{family_id:'p',observed_skus:['A','B'],windows:{'24h':metric}},{family_id:'unknown',observed_skus:['U'],unknown:true}],hidden_skus:['A']};
 const original=structuredClone(card);

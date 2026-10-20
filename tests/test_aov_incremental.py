@@ -100,3 +100,26 @@ class MigrationTests(unittest.TestCase):
   old=dict(revision=3,enabled=True,collection_mode='CYCLE',cycle_hours=4,shops=[dict(blank_shop(TMS[0]),hidden=True,hidden_skus=['A'],default_rules={'24h':{'upper':'55'},'72h':{'drop_pct':'10'},'cycle':{'upper':'9'}})])
   c=migrate_config(old,TMS);self.assertEqual(c['collection_mode'],incremental.MODE);self.assertEqual(c['cycle_hours'],4)
   self.assertEqual(c['shops'][0]['default_rules']['24h']['upper'],'55');self.assertEqual(c['shops'][0]['default_rules']['cycle']['upper'],'9');self.assertTrue(c['shops'][0]['hidden'])
+
+class CleanupTests(unittest.IsolatedAsyncioTestCase):
+ asyncSetUp=RollingIncrementalTests.asyncSetUp
+ asyncTearDown=RollingIncrementalTests.asyncTearDown
+ run_once=RollingIncrementalTests.run_once
+ async def test_cleanup_removes_duplicate_details_preserves_summary_and_receipts(self):
+  from order_pulse.aov_monitor.cleanup import cleanup
+  first=await self.run_once();original=json.dumps(first,sort_keys=True)
+  self.clock[0]+=timedelta(hours=2);second=await self.run_once()
+  result=cleanup(self.m.store,self.clock[0])
+  self.assertEqual(json.dumps(self.m.store.snapshot(first['run_id']),sort_keys=True),original)
+  self.assertTrue(self.m.store.orders(first['run_id'],'1')['details_cleared'])
+  self.assertFalse(self.m.store.orders(second['run_id'],'1')['details_cleared'])
+  jobs,metrics=incremental.plan(self.m.store,self.m.store.config()['shops'],second['start'],second['cutoff'])
+  self.assertEqual(metrics['missing_source_hours'],0)
+  self.assertTrue(all(j.get('reused') for j in jobs if j['kind']=='refunds'))
+
+ async def test_cleanup_failure_does_not_overwrite_successful_statistics(self):
+  from unittest.mock import patch
+  with patch('order_pulse.aov_monitor.cleanup.cleanup',side_effect=OSError('disk unavailable')):
+   with self.assertLogs('order_pulse.aov_monitor.card_service',level='WARNING'):
+    result=await self.run_once()
+  self.assertEqual(result['status'],'SUCCEEDED')

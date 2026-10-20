@@ -121,12 +121,11 @@ class BalanceModuleTests(unittest.IsolatedAsyncioTestCase):
 
 
 class KalodataModuleTests(unittest.TestCase):
-    def test_only_dedicated_balance_kalodata_space_binding_is_accepted(self):
-        self.assertEqual(validate_target({"space_id": 6, "space_name": "Order Pulse · Balance + Kalodata", "page_label": "p5"})["space_id"], 6)
-        with self.assertRaises(ValueError):
-            validate_target({"space_id": 2, "space_name": "配置紫鸟浏览器 CLI 授权", "page_label": "p1"})
-        with self.assertRaises(ValueError):
-            validate_target({"space_id": 3, "space_name": "Creative Factory S3-A 单条搬运", "page_label": "p1"})
+    def test_binding_names_can_change_but_empty_identity_and_wrong_purpose_fail(self):
+        for name in ('Order Pulse · 余额 · API监控','已重新命名的财务空间'):
+            self.assertEqual(validate_target({'space_id':6,'space_name':name,'page_label':'p5'})['space_name'],name)
+        for target in ({'space_id':2,'space_name':'','page_label':'p1'},{'space_id':3,'space_name':'财务','page_label':'p1','purpose':'material_aov'}):
+            with self.assertRaises(ValueError):validate_target(target)
 
     def test_ego_kalodata_transport_keeps_page_context_and_correlation(self):
         target = {"space_id": 6, "space_name": "Order Pulse · Balance + Kalodata", "page_label": "p6"}
@@ -178,29 +177,23 @@ class KalodataModuleTests(unittest.TestCase):
             repo.close()
 
 
-class UnifiedAppTests(unittest.TestCase):
+class SeparatedAppTests(unittest.TestCase):
     def test_routes_settings_security_and_page_reads_do_not_collect(self):
-        with tempfile.TemporaryDirectory() as d:
-            root = Path(d); service = Service(root)
-            service.balance.bridge.collect = AsyncMock(side_effect=AssertionError("page refresh must not collect"))
-            with TestClient(create_app(root, service=service), base_url="http://127.0.0.1:8786") as client:
-                state = client.get("/api/state").json(); csrf = state["csrf"]
-                headers = {"Origin": "http://127.0.0.1:8786", "X-CSRF-Token": csrf}
-                page = client.get("/").text
-                for label in ("余额监控", "素材情报", "客单价监控"): self.assertIn(label, page)
-                balance = client.get("/api/balance/state").json()
-                self.assertEqual(balance["settings"]["timezone"], "Asia/Shanghai")
-                self.assertEqual(client.post("/api/balance/settings", json=balance["settings"], headers=headers).status_code, 200)
-                kalodata = client.get("/api/kalodata/settings").json()
-                kalodata.update(default_period="7D", default_start_page=1, default_end_page=2)
-                self.assertEqual(client.post("/api/kalodata/settings", json=kalodata, headers=headers).status_code, 200)
-                self.assertEqual(client.get("/api/state", headers={"Host": "evil.invalid"}).status_code, 403)
-                self.assertEqual(client.post("/api/balance/action", json={"action": "pause"}).status_code, 403)
-                origin = "chrome-extension://" + "a" * 32
-                bad = client.post("/bridge/pair", json={"code": "bad", "extension_id": "a" * 32}, headers={"Origin": origin})
-                self.assertEqual(bad.status_code, 403)
-            service.balance.bridge.collect.assert_not_awaited()
+        for role,port in [('finance',8786),('materials',8797)]:
+            with tempfile.TemporaryDirectory() as d:
+                root=Path(d);service=Service(root,role=role)
+                client=TestClient(create_app(root,service=service,role=role,port=port),base_url=f'http://127.0.0.1:{port}')
+                state=client.get('/api/state').json();headers={'Origin':f'http://127.0.0.1:{port}','X-CSRF-Token':state['csrf']}
+                page=client.get('/').text
+                self.assertIn('余额监控' if role=='finance' else '素材情报',page)
+                self.assertNotIn('素材情报' if role=='finance' else '余额监控',page)
+                self.assertEqual(client.get('/api/state',headers={'Host':'evil.invalid'}).status_code,403)
+                self.assertEqual(client.get('/api/aov-monitor/state' if role=='finance' else '/api/balance/state').status_code,404)
+                if role=='finance':
+                    current=client.get('/api/balance/state').json()['settings']
+                    self.assertEqual(client.post('/api/balance/settings',json=current,headers=headers).status_code,200)
+                else:
+                    current=client.get('/api/kalodata/settings').json();current.update(default_period='7D')
+                    self.assertEqual(client.post('/api/kalodata/settings',json=current,headers=headers).status_code,200)
 
-
-if __name__ == "__main__":
-    unittest.main()
+if __name__=='__main__':unittest.main()

@@ -13,30 +13,42 @@ from .browser import BrowserError
 
 PORT=8786
 
-def create_app(root=None, service=None, port=PORT):
+def create_app(root=None, service=None, port=None, role=None):
+    role=role or os.environ.get("ORDER_PULSE_ROLE","finance")
+    if role not in ("finance","materials"):raise ValueError("工作台类型无效")
+    port=(8786 if role=="finance" else 8797) if port is None else port
     if type(port) is not int or not 1024 <= port <= 65535 or port == 8765:
         raise ValueError('独立本机端口无效')
-    root=Path(root or os.environ.get('ORDER_PULSE_HOME',Path.home()/'Library/Application Support/Order Pulse'))
-    s=service or Service(root)
-    from .aov_monitor.service import Monitor
-    from .aov_monitor.router import create_router as aov_router
-    aov=Monitor(s)
+    root=Path(root or os.environ.get('ORDER_PULSE_HOME',Path.home()/('Library/Application Support/Order Pulse Finance' if role=='finance' else 'Library/Application Support/Order Pulse Materials')))
+    s=service or Service(root,role=role,production=os.environ.get("ORDER_PULSE_PRODUCTION")=="1")
+    if role=='materials':
+        from .aov_monitor.service import Monitor
+        from .aov_monitor.router import create_router as aov_router
+        monitor=Monitor(s)
+    else:
+        from .api_monitor.service import Monitor
+        from .api_monitor.router import create_router as api_router
+        monitor=Monitor(s)
     csrf=secrets.token_urlsafe(32)
     allowed={f'127.0.0.1:{port}',f'localhost:{port}'}
     origins={'http://'+h for h in allowed}
     @asynccontextmanager
     async def life(app):
         await s.startup()
-        await aov.startup()
+        await monitor.startup()
         try:yield
         finally:
-            await aov.shutdown()
+            await monitor.shutdown()
             await s.shutdown()
     app=FastAPI(lifespan=life,docs_url=None,redoc_url=None,openapi_url=None)
     app.state.service=s
-    app.include_router(s.kalodata.runtime.router)
-    app.include_router(aov_router(aov))
-    app.state.aov_monitor=aov
+    if role=='materials':
+        app.include_router(s.kalodata.runtime.router)
+        app.include_router(aov_router(monitor))
+        app.state.aov_monitor=monitor
+    else:
+        app.include_router(api_router(monitor))
+        app.state.api_monitor=monitor
 
     @app.middleware('http')
     async def local_only(request,call_next):
@@ -62,10 +74,11 @@ def create_app(root=None, service=None, port=PORT):
     async def browser_unavailable(request,exc):
         return JSONResponse({'error':ERRORS.get(str(exc),'浏览器暂不可用，请检查TMS页面。')},409)
 
-    from .kalodata.models import KalodataError
-    @app.exception_handler(KalodataError)
-    async def material_unavailable(request,exc):
-        return JSONResponse({'error':exc.message},exc.status)
+    if role=='materials':
+        from .kalodata.models import KalodataError
+        @app.exception_handler(KalodataError)
+        async def material_unavailable(request,exc):
+            return JSONResponse({'error':exc.message},exc.status)
 
     @app.exception_handler(Exception)
     async def failed(request,exc):return JSONResponse({'error':'操作未完成，已有结果保留。'},500)
@@ -73,76 +86,97 @@ def create_app(root=None, service=None, port=PORT):
     @app.get('/api/health')
     async def health():
         import hashlib
-        return {'app':'order-pulse','status':'ok','pid':os.getpid(),
+        return {'app':'order-pulse','role':role,'status':'ok','pid':os.getpid(),
                 'data_root_id':hashlib.sha256(str(root.expanduser().resolve()).encode()).hexdigest()}
 
     @app.get('/api/state')
-    async def state():return dict(s.state(),csrf=csrf)
+    async def state():
+        value=s.state()
+        if role=='finance':value['modules']['api-monitor']={'status':'running'}
+        return dict(value,csrf=csrf)
 
-    @app.get('/api/balance/state')
-    async def balance_state():return s.balance.state()
+    if role=='finance':
+        @app.get('/api/balance/state')
+        async def balance_state():return s.balance.state()
 
-    @app.get('/api/browser-binding')
-    async def browser_binding_get():return s.balance_browser_space.state()
+        @app.get('/api/browser-binding')
+        async def browser_binding_get():return s.balance_browser_space.state()
 
-    @app.post('/api/browser-binding')
-    async def browser_binding_save(request:Request):return s.save_balance_binding(await request.json())
+        @app.get('/api/browser-binding/candidates')
+        async def binding_candidates():
+            from .integrations.finance_binding import candidates
+            return await candidates()
 
-    @app.post('/api/balance/settings')
-    async def balance_settings(request:Request):return s.balance.save_settings(await request.json())
+        @app.post('/api/browser-binding/rebind')
+        async def binding_rebind(request:Request):
+            from .integrations.finance_binding import rebind
+            return await rebind(s,await request.json())
 
-    @app.post('/api/balance/accounts')
-    async def balance_accounts(request:Request):
-        value=await request.json();return s.balance.save_accounts(value.get('accounts') if isinstance(value,dict) else None)
+        @app.post('/api/browser-binding')
+        async def browser_binding_save(request:Request):
+            from .integrations.finance_binding import rebind
+            body=await request.json()
+            if not isinstance(body,dict):raise ValueError('绑定字段无效')
+            return await rebind(s,{k:body.get(k) for k in ('space_id','expected_name','profile_id','profile_name')})
 
-    @app.post('/api/balance/credentials')
-    async def balance_credentials(request:Request):return s.balance.save_credentials(await request.json())
+        @app.post('/api/balance/settings')
+        async def balance_settings(request:Request):return s.balance.save_settings(await request.json())
 
-    @app.post('/api/balance/action')
-    async def balance_action(request:Request):
-        value=await request.json()
-        if not isinstance(value,dict) or set(value)!={'action'} or not isinstance(value['action'],str):raise ValueError('余额操作无效')
-        return await s.balance.action(value['action'])
+        @app.post('/api/balance/accounts')
+        async def balance_accounts(request:Request):
+            value=await request.json();return s.balance.save_accounts(value.get('accounts') if isinstance(value,dict) else None)
 
-    @app.post('/api/balance/browser-target')
-    async def balance_browser_target(request:Request):
-        return s.balance.bind_browser(await request.json())
+        @app.post('/api/balance/credentials')
+        async def balance_credentials(request:Request):return s.balance.save_credentials(await request.json())
 
-    @app.post('/api/balance/preview')
-    async def balance_preview(request:Request):return s.balance.preview(await request.json())
+        @app.post('/api/balance/action')
+        async def balance_action(request:Request):
+            value=await request.json()
+            if not isinstance(value,dict) or set(value)!={'action'} or not isinstance(value['action'],str):raise ValueError('余额操作无效')
+            if value['action'] in ('query','push','connect'):s.repo.set('finance_user_action',None)
+            return await s.balance.action(value['action'])
 
-    @app.get('/api/kalodata/settings')
-    async def kalodata_settings_get():return s.kalodata.settings()
+        @app.post('/api/balance/browser-target')
+        async def balance_browser_target(request:Request):
+            return s.balance.bind_browser(await request.json())
 
-    @app.post('/api/kalodata/settings')
-    async def kalodata_settings_save(request:Request):return s.kalodata.save_settings(await request.json())
+        @app.post('/api/balance/preview')
+        async def balance_preview(request:Request):return s.balance.preview(await request.json())
 
-    @app.post('/api/kalodata/browser-target')
-    async def kalodata_browser_target(request:Request):return s.kalodata.bind_browser(await request.json())
+    if role=='materials':
+        @app.get('/api/kalodata/settings')
+        async def kalodata_settings_get():return s.kalodata.settings()
 
-    @app.get('/api/kalodata/status')
-    async def kalodata_status():return await s.kalodata.status()
+        @app.post('/api/kalodata/settings')
+        async def kalodata_settings_save(request:Request):return s.kalodata.save_settings(await request.json())
 
-    @app.post('/api/kalodata/health')
-    async def kalodata_health():return await s.kalodata.health()
+        @app.post('/api/kalodata/browser-target')
+        async def kalodata_browser_target(request:Request):return s.kalodata.bind_browser(await request.json())
 
-    @app.get('/api/materials/kalodata/v1/connection')
-    async def kalodata_connection():return s.kalodata.connection()
+        @app.get('/api/kalodata/status')
+        async def kalodata_status():return await s.kalodata.status()
 
-    @app.post('/api/materials/kalodata/v1/connection/reset')
-    async def kalodata_connection_reset():return s.kalodata.reset_connection()
+        @app.post('/api/kalodata/health')
+        async def kalodata_health():return await s.kalodata.health()
 
-    @app.post('/api/credentials')
-    async def credentials(request:Request):
-        data=await request.json()
-        if set(data)-{'webhook','secret','keyword'} or any(not isinstance(v,str) or len(v)>2048 for v in data.values()):raise ValueError('飞书设置无效')
-        current=s.secrets.get()
-        for k,v in data.items():
-            if v:current[k]=v
-        s.secrets.save(current)
-        return {'configured':s.secrets.configured()}
+        @app.get('/api/materials/kalodata/v1/connection')
+        async def kalodata_connection():return s.kalodata.connection()
 
-    static=Path(__file__).parent.parent/'static'
+        @app.post('/api/materials/kalodata/v1/connection/reset')
+        async def kalodata_connection_reset():return s.kalodata.reset_connection()
+
+    if role=='materials':
+        @app.post('/api/credentials')
+        async def credentials(request:Request):
+            data=await request.json()
+            if set(data)-{'webhook','secret','keyword'} or any(not isinstance(v,str) or len(v)>2048 for v in data.values()):raise ValueError('飞书设置无效')
+            current=s.secrets.get()
+            for k,v in data.items():
+                if v:current[k]=v
+            s.secrets.save(current)
+            return {'configured':s.secrets.configured()}
+
+    static=Path(__file__).parent.parent/'static'/role
     @app.get('/')
     async def index():return FileResponse(static/'index.html')
     app.mount('/static',StaticFiles(directory=static),name='static')
@@ -152,11 +186,12 @@ def main():
     import uvicorn
     # Single-instance file lock survives closing the web page; never shares old port.
     import fcntl
-    root=Path(os.environ.get('ORDER_PULSE_HOME',Path.home()/'Library/Application Support/Order Pulse'))
+    role=os.environ.get('ORDER_PULSE_ROLE','finance')
+    root=Path(os.environ.get('ORDER_PULSE_HOME',Path.home()/('Library/Application Support/Order Pulse Finance' if role=='finance' else 'Library/Application Support/Order Pulse Materials')))
     root.mkdir(mode=0o700,parents=True,exist_ok=True)
     lock=(root/'service.lock').open('a')
     try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:raise SystemExit('Order Pulse is already running')
-    uvicorn.run(create_app(root),host='127.0.0.1',port=PORT,access_log=False,log_level='warning')
+    uvicorn.run(create_app(root,role=role),host='127.0.0.1',port=8786 if role=='finance' else 8797,access_log=False,log_level='warning')
 
 if __name__=='__main__':main()

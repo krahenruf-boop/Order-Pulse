@@ -14,9 +14,9 @@ PERIODS={'YESTERDAY','7D','30D','90D','180D','365D'}
 
 
 class KalodataModule:
-    def __init__(self,root,repo,credentials):
+    def __init__(self,root,repo,credentials,production=None):
         self.root=Path(root);self.repo=repo
-        self.production=self.root.resolve()==(Path.home()/'Library/Application Support/Order Pulse').resolve()
+        self.production=(self.root.resolve()==(Path.home()/'Library/Application Support/Order Pulse').resolve()) if production is None else production
         legacy=(Path.home()/'Library/Application Support/TikTokOPS-Kalodata-Pilot/modules/kalodata/extension-auth.json') if self.production else None
         self.transport=KalodataPluginClient(root,credentials,legacy_auth=legacy)
         self.runtime=create_runtime(root,enabled=self.settings()['enabled'],connector=BrowserProvider(self.transport))

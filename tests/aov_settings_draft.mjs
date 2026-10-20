@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {createAovSettingsDraft} from '../static/aov-monitor.js';
+import {createAovSettingsDraft} from '../static/materials/aov-monitor.js';
 const rules=Object.fromEntries(['24h','48h','72h','7d'].map(w=>[w,{lower:'20',upper:'80',drop_pct:null,rise_pct:null,min_orders:10}]));
 const product={family_id:'f1',name:'腰带扣',skus:['H1','H1*2'],rules};
 const shop={id:'1',name:'店铺一',monitor:true,push:true,mapping_confirmed:true,miaoshou_shop_id:'m1',miaoshou_shop_name:'店铺一',currency:'BRL',sku_aliases:{tms:{},miaoshou:{H2:'H1*2'}},products:[product]};

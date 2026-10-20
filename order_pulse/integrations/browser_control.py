@@ -4,7 +4,6 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from ..browser import blocking
-from ..kalodata.models import KalodataError
 from .ego_runtime import execute, EgoRuntimeError
 from .input_idle import input_idle_seconds
 
@@ -16,12 +15,14 @@ class BrowserControl:
         self.states = {}
         self.workbench_states = {}
         self.material_needs_user = lambda: False
+        self.finance_needs_user = lambda: False
 
     def show_workbench(self, module, *, locked=False):
         """Best-effort completion UI; never competes with another source operation."""
-        if module not in ('balance', 'aov-monitor', 'kalodata'):
+        if module not in ('balance', 'api-monitor', 'aov-monitor', 'kalodata'):
             return 'INVALID_MODULE'
-        owner = self.balance if module == 'balance' else self.operations
+        owner = self.balance if module in ('balance','api-monitor') else self.operations
+        if owner is None:return 'BINDING_REQUIRED'
         acquired = False
         if not locked:
             acquired = owner.lock.acquire(blocking=False)
@@ -32,7 +33,7 @@ class BrowserControl:
             if not binding:
                 return 'BINDING_REQUIRED'
             result = execute(Path(__file__).with_name('ego_workbench.js'),
-                             dict(binding=binding, module=module),
+                             dict(binding=binding, module=module, origin='http://127.0.0.1:8786' if module in ('balance','api-monitor') else 'http://127.0.0.1:8797'),
                              'ORDER_PULSE_WORKBENCH:', timeout=8)
             state = result.get('state', 'UNAVAILABLE')
         except Exception:
@@ -64,6 +65,7 @@ class BrowserControl:
 
     @asynccontextmanager
     async def operation(self):
+        from ..kalodata.models import KalodataError
         # Both runtimes share a thread mutex; never block either event loop.
         deadline = asyncio.get_running_loop().time() + 20
         while not self.operations.lock.acquire(blocking=False):
@@ -86,9 +88,9 @@ class BrowserControl:
                 self.operations.lock.release()
 
     async def maintain_once(self):
-        await blocking(self.ensure, self.balance.get(), 'balance')
+        if self.balance and not self.finance_needs_user():await blocking(self.ensure, self.balance.get(), 'balance')
         idle = input_idle_seconds()
-        if idle is not None and idle >= 300 and not self.operations.lock.locked():
+        if self.operations and idle is not None and idle >= 300 and not self.operations.lock.locked():
             await blocking(self.ensure, self.operations.get(), 'idle')
         # This local timer does not run source checks or fetch orders.
         return max(1, 300 - idle) if idle is not None and idle < 300 else 300

@@ -44,7 +44,7 @@ class BalanceModule:
     def __init__(self,root,credentials,browser_lock=None,browser_binding=None):
         self.store=Store(root)
         current=self.store.settings()
-        if current.get('browser_mode')!='ego_lite' or current.get('expected_profile') not in BALANCE_SPACE_NAMES:
+        if current.get('browser_mode')!='ego_lite':
             # Module-local compatibility migration.  Preserve every business and
             # scheduler value while replacing the retired extension transport.
             current=dict(current,browser_mode='ego_lite',expected_profile=BALANCE_SPACE_NAMES[0])

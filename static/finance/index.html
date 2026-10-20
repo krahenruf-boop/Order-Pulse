@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Order Pulse</title><link rel="stylesheet" href="/static/style.css"><script type="module" src="/static/app.js"></script></head>
+<body>
+<header class="header"><a class="brand" href="#balance"><span class="logo">P<span>.</span></span><span><strong>Order Pulse</strong><small>Operations Monitor</small></span></a><nav><a href="#balance" id="nav-balance">余额监控</a><a href="#api-monitor" id="nav-api-monitor">API 监控</a></nav><div class="header-right"><span id="connection" class="status"><i></i>正在连接</span><button id="settings-open" class="icon-button" aria-label="打开设置">设置 <span aria-hidden="true">⚙</span></button></div></header>
+<main>
+<div id="service-notice" class="notice error" role="status" hidden></div>
+<section id="balance" hidden></section>
+<section id="api-monitor" hidden></section>
+<footer><span class="brand-mini">P. <b>Order Pulse</b></span><span>数据用于运营趋势监测，不作为财务结算依据。</span></footer>
+</main><div id="toast" role="status" hidden></div></body></html>

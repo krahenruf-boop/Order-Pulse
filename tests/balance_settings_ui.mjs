@@ -1,4 +1,4 @@
-import {createBalance,balanceSettingsDraft} from '../static/balance.js';
+import {createBalance,balanceSettingsDraft} from '../static/finance/balance.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const active = ['title','account','alert','recovery'];

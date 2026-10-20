@@ -11,7 +11,7 @@ from tests.test_browser_space_binding import binding
 
 class SpaceRelocationTests(unittest.TestCase):
     def test_chinese_balance_name_persists_without_rewriting_legacy_binding(self):
-        for name in ('Order Pulse · 余额监控', binding()['expected_name']):
+        for name in ('Order Pulse · 余额 · API监控','我的财务空间', 'Order Pulse · 余额监控', binding()['expected_name']):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as d:
                 manager=BrowserSpaceBinding(Repository(d))
                 saved=manager.save(dict(binding(1),expected_name=name))

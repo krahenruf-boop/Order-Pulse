@@ -318,3 +318,14 @@ async def run_cards(monitor,rid,context):
         if slot:
             for key,state in states.items():states[key]=transition(state,{'status':'INCOMPLETE'},slot,True,state.get('revision'))[0]
         store.finish(rid,dict(run_id=rid,status='FAILED',cutoff=context['cutoff'],groups=[],shop_cards=cards,error='本次同步未完成，已保留上次完整结果。',error_code=code,diagnostic={'stage':context.get('phase','DIRECTORY'),'kind':type(exc).__name__}),states if slot else None)
+
+    finally:
+        # Cleanup must never replace a completed business snapshot with a failure.
+        if inc and not monitor.stopping:
+            from .cleanup import cleanup
+            from ..browser import blocking
+            try:await blocking(cleanup,store,at)
+            except asyncio.CancelledError:raise
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning('客单价临时明细清理未完成；下轮重试，统计结果保留')

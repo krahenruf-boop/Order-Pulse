@@ -2,11 +2,8 @@
 import asyncio
 from .storage import Repository, Credentials
 from .tms_core.monitor_domain import stamp
-from .balance.module import BalanceModule
-from .kalodata.module import KalodataModule
 from .integrations.browser_binding import BrowserSpaceBinding, OperationsSpaceBinding
 from .integrations.browser_control import BrowserControl
-from .integrations.tms_login import TmsLogin
 
 ERRORS={
  'WAITING_FOR_BROWSER':'浏览器使用中，自动任务仍保持启用。完成操作后可确认交还并查询。',
@@ -26,27 +23,33 @@ ERRORS={
 }
 
 class Service:
-    def __init__(self, root, clock=stamp):
-        self.repo=Repository(root)
+    def __init__(self, root, clock=stamp, role="legacy", production=None):
+        self.role=role
+        self.repo=Repository(root,role=role)
         self.secrets=Credentials(root)
         self.clock=clock
-        self.balance_browser_space=BrowserSpaceBinding(self.repo)
-        self.browser_space=OperationsSpaceBinding(self.repo)
-        self.balance=BalanceModule(root,self.secrets,
-            browser_lock=self.balance_browser_space.lock,browser_binding=self.balance_browser_space)
-        self.kalodata=KalodataModule(root,self.repo,self.secrets)
+        self.balance_browser_space=BrowserSpaceBinding(self.repo) if role!='materials' else None
+        self.browser_space=OperationsSpaceBinding(self.repo) if role!='finance' else None
         self.browser_control=BrowserControl(self.browser_space,self.balance_browser_space)
-        self.balance.bridge.return_to_workbench=lambda: self.browser_control.show_workbench('balance')
-        self.browser_control.material_needs_user=lambda: self.kalodata.transport.logged_in is False
-        self.tms_login=TmsLogin(self)
-        if self.kalodata.production:
-            from .integrations.material_background import MaterialBackground
-            self.kalodata.transport.background_factory=lambda: MaterialBackground(self.browser_space.get())
-            self.kalodata.transport.operation_guard=self.browser_control.operation
+        if role!='materials':
+            from .balance.module import BalanceModule
+            self.balance=BalanceModule(root,self.secrets,browser_lock=self.balance_browser_space.lock,browser_binding=self.balance_browser_space)
+            self.browser_control.finance_needs_user=lambda:bool(self.repo.get('finance_user_action'))
+            self.balance.bridge.return_to_workbench=lambda: self.browser_control.show_workbench('balance')
+        if role!='finance':
+            from .kalodata.module import KalodataModule
+            from .integrations.tms_login import TmsLogin
+            self.kalodata=KalodataModule(root,self.repo,self.secrets,production=production)
+            self.browser_control.material_needs_user=lambda: self.kalodata.transport.logged_in is False
+            self.tms_login=TmsLogin(self)
+            if self.kalodata.production:
+                from .integrations.material_background import MaterialBackground
+                self.kalodata.transport.background_factory=lambda: MaterialBackground(self.browser_space.get())
+                self.kalodata.transport.operation_guard=self.browser_control.operation
         self.lock=asyncio.Lock()
         self.stopping=False
         self.timer=None
-        self._apply_balance_binding()
+        if role!="materials":self._apply_balance_binding()
 
     def _apply_balance_binding(self):
         target=self.balance_browser_space.target('balance')
@@ -60,10 +63,10 @@ class Service:
         return self.balance_browser_space.state()
 
     async def startup(self):
-        await self.balance.startup()
-        await self.kalodata.startup()
-        if self.kalodata.production:self.browser_control.start()
-        self.timer=asyncio.create_task(self.scheduler())
+        if self.role!='materials':await self.balance.startup()
+        if self.role!='finance':await self.kalodata.startup()
+        self.browser_control.start()
+        if self.role!='materials':self.timer=asyncio.create_task(self.scheduler())
 
     async def shutdown(self):
         self.stopping=True
@@ -71,22 +74,23 @@ class Service:
             self.timer.cancel()
             await asyncio.gather(self.timer,return_exceptions=True)
         await self.browser_control.stop()
-        await self.kalodata.shutdown()
-        await self.balance.shutdown()
+        if self.role!='finance':await self.kalodata.shutdown()
+        if self.role!='materials':await self.balance.shutdown()
 
     def state(self):
-        return dict(busy=self.lock.locked(),feishu_configured=self.secrets.configured(),
-            browser_bindings={'balance':self.balance_browser_space.state(),'operations':self.browser_space.state()},
-            modules={
-                'balance':{'status':'running' if self.balance.started else 'stopped',
-                           'paused':self.balance.store.settings()['paused']},
-                'kalodata':{'status':'ready' if self.kalodata.transport.info()['state']=='CONNECTED' else 'waiting_connection'},
-                'aov-monitor':{'status':'running'},
-            })
+        modules={};bindings={}
+        if self.role!='materials':
+            modules['balance']={'status':'running' if self.balance.started else 'stopped','paused':self.balance.store.settings()['paused']}
+            bindings['balance']=self.balance_browser_space.state()
+        if self.role!='finance':
+            modules.update(kalodata={'status':'ready' if self.kalodata.transport.info()['state']=='CONNECTED' else 'waiting_connection'},**{'aov-monitor':{'status':'running'}})
+            bindings['operations']=self.browser_space.state()
+        return dict(busy=self.lock.locked(),role=self.role,feishu_configured=self.balance.feishu.status()['webhook_configured'] if self.role=='finance' else self.secrets.configured(),browser_bindings=bindings,modules=modules)
 
     async def scheduler(self):
         while not self.stopping:
-            try:await self.balance.tick()
+            try:
+                if not self.repo.get('finance_user_action'):await self.balance.tick()
             except asyncio.CancelledError:raise
             except Exception:self.balance.store.log('scheduler','余额调度内部错误，将在下一轮重试',level='error')
             await asyncio.sleep(2)

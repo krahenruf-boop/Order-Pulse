@@ -152,7 +152,7 @@ class BalanceNotificationPolicyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):validate_settings(settings)
 
     def test_settings_ui_exposes_only_active_templates_and_omits_legacy_draft(self):
-        source=(Path(__file__).parents[1]/'static/balance.js').read_text()
+        source=(Path(__file__).parents[1]/'static/finance/balance.js').read_text()
         self.assertNotIn('失败模板',source);self.assertNotIn('template_failure',source)
         for name in ('title','account','alert','recovery'):self.assertIn('name="template_'+name+'"',source)
         self.assertNotIn('templates:{...draft.templates,',source)
