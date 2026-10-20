@@ -9,6 +9,15 @@ from ..integrations.ego_runtime import execute
 from ..feishu import FeishuClient
 
 def utc():return datetime.now(timezone.utc)
+
+def friendly_error(error):
+    """Keep browser engine diagnostics out of notices, including older faults."""
+    text=str(error or '')
+    if re.search(r'timed out|timeout|BROWSER_TIMEOUT',text,re.I):return '供应商页面读取超时，请稍后手动刷新'
+    if re.search(r'page\.|document\.|navigation committed|Traceback|WAITING_CONNECTION',text) or not re.search(r'[\u3400-\u9fff]',text):
+        return '供应商页面暂不可读取，请检查浏览器与网络后刷新'
+    return text
+
 class Monitor:
     def __init__(self,host,clock=utc,collector=None,sender=None):
         self.host=host;self.repo=host.repo;self.clock=clock;self.collector=collector or self.collect;self.sender=sender
@@ -26,12 +35,17 @@ class Monitor:
     def state(self):
         now=self.clock();items=[]
         for pid in PROVIDERS:
-            c=self.get(pid);last=c['last'];items.append(dict(c,id=pid,name=PROVIDERS[pid],busy=pid in self.workers,next_at=next_at(now,c['time'],c['last_day']) if c['enabled'] else None,ratio=ratio(pid,last,c['baseline']) if last else None))
+            c=self.get(pid);last=c['last']
+            if c['fault']:c['fault']=dict(c['fault'],error=friendly_error(c['fault']['error']))
+            items.append(dict(c,id=pid,name=PROVIDERS[pid],busy=pid in self.workers,next_at=next_at(now,c['time'],c['last_day']) if c['enabled'] else None,ratio=ratio(pid,last,c['baseline']) if last else None))
         return {'providers':items,'timezone':'Asia/Shanghai'}
     def history(self,pid):
         self.get(pid)
         with self.repo.db() as d:
-            return dict(readings=[dict(id=r[0],at=r[1],**json.loads(r[2])) for r in d.execute('SELECT id,at,payload FROM api_monitor_history WHERE provider=? ORDER BY at DESC LIMIT 100',(pid,))],notifications=[dict(id=r[0],kind=r[1],status=r[2],at=r[3]) for r in d.execute('SELECT id,kind,status,at FROM api_monitor_outbox WHERE provider=? ORDER BY at DESC LIMIT 100',(pid,))])
+            readings=[dict(id=r[0],at=r[1],**json.loads(r[2])) for r in d.execute('SELECT id,at,payload FROM api_monitor_history WHERE provider=? ORDER BY at DESC LIMIT 100',(pid,))]
+            for row in readings:
+                if not row.get('ok'):row['error']=friendly_error(row.get('error'))
+            return dict(readings=readings,notifications=[dict(id=r[0],kind=r[1],status=r[2],at=r[3]) for r in d.execute('SELECT id,kind,status,at FROM api_monitor_outbox WHERE provider=? ORDER BY at DESC LIMIT 100',(pid,))])
     async def settings(self,pid,value):
         c=self.get(pid)
         if pid in self.workers:raise ValueError('正在读取，请结束后保存设置')
@@ -79,7 +93,7 @@ class Monitor:
         last=c.get('last') or {};r=ratio(pid,last,c['baseline']) if last else None
         title={'low':'低额度预警','recovery':'额度恢复正常','fault':'额度监控故障','reminder':'额度监控持续故障','fault_recovery':'额度采集恢复','test':'API 额度监控测试'}[kind]
         lines=[f'{PROVIDERS[pid]} · {title}',f'账户／工作区：{last.get("identity","尚未核验")}',f'剩余额度：{last.get("remaining","—")} {last.get("unit","")}',f'剩余比例：{Decimal(r):.2f}%' if r is not None else '剩余比例：—',f'预警阈值：{c["threshold"]}%',f'读取时间：{datetime.fromisoformat(last.get("at") or now.isoformat()).astimezone(TZ).strftime("%Y-%m-%d %H:%M:%S")}（北京时间）']
-        if kind in ('fault','reminder'):lines.append('原因：'+c['fault']['error'])
+        if kind in ('fault','reminder'):lines.append('原因：'+friendly_error(c['fault']['error']))
         if kind=='test':lines.append('此为测试消息，未消耗 API 或语音额度。')
         payload=dict(text='\n'.join(lines),attempt_at=None)
         d.execute('INSERT OR IGNORE INTO api_monitor_outbox VALUES(?,?,?,?,?,?)',(event,pid,kind,'pending',now.isoformat(),json.dumps(payload,ensure_ascii=False)))
@@ -107,7 +121,7 @@ class Monitor:
                     c['low']=False
             self.put(d,pid,c)
     def fail(self,pid,error):
-        c=self.get(pid);now=self.clock()
+        c=self.get(pid);now=self.clock();error=friendly_error(error)
         if not c['fault']:c['fault']=dict(episode=uuid.uuid4().hex,since=now.isoformat(),error=error)
         else:c['fault']['error']=error
         fault=c['fault'];stage=int((now-datetime.fromisoformat(fault['since'])).total_seconds()//21600)
@@ -119,7 +133,7 @@ class Monitor:
         try:self.accept(pid,await blocking(self.collector,pid))
         except asyncio.CancelledError:raise
         except Exception as e:
-            error=str(e) if isinstance(e,ValueError) else '供应商页面暂不可读取，已有额度保留'
+            error=friendly_error(e) if isinstance(e,ValueError) else '供应商页面暂不可读取，已有额度保留'
             self.fail(pid,error)
             with self.repo.db() as d:
                 d.execute('INSERT INTO api_monitor_history VALUES(?,?,?,?)',(uuid.uuid4().hex,pid,now.isoformat(),json.dumps(dict(ok=False,error=error),ensure_ascii=False)))

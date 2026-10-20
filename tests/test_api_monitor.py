@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from fastapi.testclient import TestClient
 from order_pulse.storage import Repository
-from order_pulse.api_monitor.service import Monitor
+from order_pulse.api_monitor.service import Monitor,friendly_error
 from order_pulse.api_monitor.domain import reading,ratio
 from order_pulse.server import create_app
 
@@ -105,3 +105,40 @@ class HumanActionTests(QuotaFixture):
         await self.m.start('deepseek');await asyncio.gather(*list(self.m.workers.values()))
         self.assertIsNone(self.repo.get('finance_user_action'))
         self.assertEqual(self.m.get('deepseek')['last']['remaining'],'100')
+
+class BrowserFaultTests(QuotaFixture):
+    async def test_browser_timeout_preserves_reading_and_recovers_once(self):
+        self.m.accept('elevenlabs',self.el('80'))
+        raw='page.goto timed out after 15000ms waiting for load; navigation committed at "https://elevenlabs.io/app/settings" with document.readyState="interactive".'
+        def fail(_):raise ValueError(raw)
+        self.m.collector=fail
+        await self.m.check('elevenlabs');await self.m.check('elevenlabs')
+        self.assertEqual(self.m.get('elevenlabs')['last']['remaining'],'80')
+        self.assertEqual(len(self.sent),1)
+        self.assertNotIn('page.goto',self.sent[0][0])
+        self.assertIn('读取超时',self.m.state()['providers'][1]['fault']['error'])
+        failed=[r for r in self.m.history('elevenlabs')['readings'] if not r['ok']]
+        self.assertTrue(failed)
+        self.assertTrue(all(r['error']==friendly_error(raw) for r in failed))
+        self.m.collector=lambda _:self.el('79')
+        await self.m.check('elevenlabs');await self.m.check('elevenlabs')
+        self.assertIsNone(self.m.get('elevenlabs')['fault'])
+        self.assertEqual(len(self.sent),2,'only one fault recovery notification')
+        self.assertEqual(self.m.get('elevenlabs')['last']['remaining'],'79')
+
+    async def test_old_diagnostics_are_presented_without_rewriting_history(self):
+        import json
+        raw='page.goto timed out after 15000ms waiting for load; document.readyState="interactive"'
+        self.m.accept('elevenlabs',self.el('80'))
+        c=self.m.get('elevenlabs');c['fault']=dict(error=raw,episode='old',since=self.now.isoformat())
+        with self.repo.db() as d:
+            self.m.put(d,'elevenlabs',c)
+            d.execute('INSERT INTO api_monitor_history VALUES(?,?,?,?)',('old-fault','elevenlabs',self.now.isoformat(),json.dumps(dict(ok=False,error=raw))))
+        self.assertEqual(self.m.state()['providers'][1]['fault']['error'],friendly_error(raw))
+        self.assertTrue(all('page.goto' not in r.get('error','') for r in self.m.history('elevenlabs')['readings']))
+        with self.repo.db() as d:
+            saved=json.loads(d.execute('SELECT payload FROM api_monitor_history WHERE id=?',('old-fault',)).fetchone()[0])
+        self.assertEqual(saved['error'],raw)
+        for raw in ('net::ERR_CONNECTION_RESET','page.evaluate failed: 页面执行失败','WAITING_CONNECTION'):
+            self.assertIn('供应商页面',friendly_error(raw))
+        self.assertEqual(friendly_error('账户或工作区已变化，请核对后重新绑定'),'账户或工作区已变化，请核对后重新绑定')
