@@ -244,6 +244,8 @@ body:has(#api-settings[open]){overflow:hidden}
 #api-settings .quota-input-unit>span{position:absolute;right:14px;top:0;display:flex;align-items:center;height:44px;font-size:12px;color:#8992a3;pointer-events:none}
 #api-settings .quota-input-unit input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 #api-settings .quota-field-help{font-size:11px;color:#8992a3;line-height:1.7;margin:10px 0 0}
+#api-settings .quota-recheck-rule{display:grid;grid-template-columns:164px 1fr;align-items:end;gap:18px;margin-top:18px}
+#api-settings .quota-recheck-rule .quota-field-help{margin:0 0 2px}
 #api-settings .quota-baseline-meta{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:10px;color:#939bac;font-size:10px;line-height:1.6}
 #api-settings #reset-baseline{border:0;background:transparent;padding:4px 0;color:#315cf4;font-size:11px;font-weight:500}
 #api-settings #reset-baseline:hover{color:#244bdb;text-decoration:underline}
@@ -264,6 +266,7 @@ body:has(#api-settings[open]){overflow:hidden}
  #api-settings h2{font-size:19px}
  #api-settings .quota-settings-body{padding:20px}
  #api-settings .quota-fields{grid-template-columns:1fr;gap:16px}
+ #api-settings .quota-recheck-rule{grid-template-columns:1fr;gap:9px}
  #api-settings .quota-settings-footer{padding:14px 20px}
  #api-settings .quota-baseline-meta{align-items:flex-start}
 }

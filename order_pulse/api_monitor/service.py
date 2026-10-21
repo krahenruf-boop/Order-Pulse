@@ -1,4 +1,4 @@
-"""Durable daily schedule, quota/health episodes and transactional outbox."""
+"""Durable daily/low-quota schedules, health episodes and transactional outbox."""
 import asyncio,json,re,uuid
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal
@@ -27,17 +27,36 @@ class Monitor:
             CREATE TABLE IF NOT EXISTS api_monitor_history(id TEXT PRIMARY KEY,provider TEXT NOT NULL,at TEXT NOT NULL,payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS api_monitor_outbox(id TEXT PRIMARY KEY,provider TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,at TEXT NOT NULL,payload TEXT NOT NULL);''')
             for pid in PROVIDERS:
-                d.execute('INSERT OR IGNORE INTO api_monitor_providers VALUES(?,?)',(pid,json.dumps(dict(enabled=True,push=True,threshold='15',time='09:00',baseline=None,baseline_at=None,last=None,low=False,low_episode=None,fault=None,last_day=None))))
+                d.execute('INSERT OR IGNORE INTO api_monitor_providers VALUES(?,?)',(pid,json.dumps(dict(enabled=True,push=True,threshold='15',time='09:00',baseline=None,baseline_at=None,last=None,low=False,low_episode=None,fault=None,last_day=None,low_interval_hours=1,last_check_at=None))))
+                c=json.loads(d.execute('SELECT payload FROM api_monitor_providers WHERE id=?',(pid,)).fetchone()[0])
+                if 'low_interval_hours' not in c or 'last_check_at' not in c:
+                    c.setdefault('low_interval_hours',1)
+                    latest=d.execute('SELECT at FROM api_monitor_history WHERE provider=? ORDER BY at DESC LIMIT 1',(pid,)).fetchone()
+                    c.setdefault('last_check_at',latest[0] if latest else (c.get('last') or {}).get('at'))
+                    self.put(d,pid,c)
     def get(self,pid):
         if pid not in PROVIDERS:raise ValueError('供应商不存在')
         with self.repo.db() as d:return json.loads(d.execute('SELECT payload FROM api_monitor_providers WHERE id=?',(pid,)).fetchone()[0])
     def put(self,d,pid,c):d.execute('UPDATE api_monitor_providers SET payload=? WHERE id=?',(json.dumps(c,ensure_ascii=False),pid))
+    def schedule(self,pid,c,now):
+        local=now.astimezone(TZ);h,m=map(int,c['time'].split(':'))
+        daily_due=c['last_day']!=local.date().isoformat() and (c['last_day'] is None or (local.hour,local.minute)>=(h,m))
+        due=now if daily_due else datetime.fromisoformat(next_at(now,c['time'],c['last_day']))
+        current=ratio(pid,c['last'],c['baseline']) if c['last'] else None
+        # A changed threshold/baseline cannot invent a recovery for an open
+        # low-quota episode. An actual recovered reading ends faster checks.
+        low=bool(c['low'] or current is not None and Decimal(current)<=amount(c['threshold']))
+        anchor=c.get('last_check_at') or (c['last'] or {}).get('at')
+        if low and anchor:
+            due=min(due,datetime.fromisoformat(anchor)+timedelta(hours=c['low_interval_hours']))
+        return due,('low_recheck' if low else 'daily')
     def state(self):
         now=self.clock();items=[]
         for pid in PROVIDERS:
             c=self.get(pid);last=c['last']
             if c['fault']:c['fault']=dict(c['fault'],error=friendly_error(c['fault']['error']))
-            items.append(dict(c,id=pid,name=PROVIDERS[pid],busy=pid in self.workers,next_at=next_at(now,c['time'],c['last_day']) if c['enabled'] else None,ratio=ratio(pid,last,c['baseline']) if last else None))
+            due,mode=self.schedule(pid,c,now)
+            items.append(dict(c,id=pid,name=PROVIDERS[pid],busy=pid in self.workers,next_at=due.isoformat() if c['enabled'] else None,schedule_mode=mode,ratio=ratio(pid,last,c['baseline']) if last else None))
         return {'providers':items,'timezone':'Asia/Shanghai'}
     def history(self,pid):
         self.get(pid)
@@ -49,12 +68,13 @@ class Monitor:
     async def settings(self,pid,value):
         c=self.get(pid)
         if pid in self.workers:raise ValueError('正在读取，请结束后保存设置')
-        if not isinstance(value,dict) or set(value)-{'enabled','push','threshold','time','baseline','reset_baseline','rebind'}:raise ValueError('设置字段无效')
+        if not isinstance(value,dict) or set(value)-{'enabled','push','threshold','time','baseline','reset_baseline','rebind','low_interval_hours'}:raise ValueError('设置字段无效')
         for k in ('enabled','push','reset_baseline','rebind'):
             if k in value and type(value[k]) is not bool:raise ValueError('开关格式无效')
         if 'threshold' in value and not 0<=amount(value['threshold'])<=100:raise ValueError('阈值应为 0–100%')
         if 'time' in value and (not isinstance(value['time'],str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',value['time'])):raise ValueError('时间应为 HH:mm')
-        was=c['enabled'];c.update({k:v for k,v in value.items() if k in ('enabled','push','threshold','time')})
+        if 'low_interval_hours' in value and (type(value['low_interval_hours']) is not int or not 1<=value['low_interval_hours']<=24):raise ValueError('低额度复查间隔应为 1–24 小时的整数')
+        was=c['enabled'];c.update({k:v for k,v in value.items() if k in ('enabled','push','threshold','time','low_interval_hours')})
         if 'baseline' in value or value.get('reset_baseline'):
             if pid!='deepseek':raise ValueError('此平台使用当期总额度')
             base=value.get('baseline') if not value.get('reset_baseline') else (c['last'] or {}).get('remaining')
@@ -62,7 +82,7 @@ class Monitor:
             c.update(baseline=base,baseline_at=self.clock().isoformat())
         if value.get('rebind'):
             # An explicit user action starts a new identity/episode; history remains.
-            c.update(last=None,baseline=None,baseline_at=None,low=False,low_episode=None,fault=None,last_day=None)
+            c.update(last=None,baseline=None,baseline_at=None,low=False,low_episode=None,fault=None,last_day=None,last_check_at=None)
             with self.repo.db() as d:d.execute("UPDATE api_monitor_outbox SET status='cancelled' WHERE provider=? AND status IN ('pending','failed')",(pid,))
         with self.repo.db() as d:self.put(d,pid,c)
         if c['enabled'] and (not was or value.get('rebind')):await self.start(pid)
@@ -101,7 +121,7 @@ class Monitor:
     def accept(self,pid,raw):
         now=self.clock();c=self.get(pid);v=reading(pid,raw,c['last']);v['at']=now.isoformat()
         if pid=='deepseek' and c['baseline'] is None and amount(v['remaining'])>0:c.update(baseline=v['remaining'],baseline_at=now.isoformat())
-        old=c['last'];c['last']=v;c['last_day']=now.astimezone(TZ).date().isoformat()
+        old=c['last'];c['last']=v;c['last_day']=now.astimezone(TZ).date().isoformat();c['last_check_at']=now.isoformat()
         r=ratio(pid,v,c['baseline']);is_low=r is not None and Decimal(r)<=amount(c['threshold'])
         with self.repo.db() as d:
             d.execute('INSERT INTO api_monitor_history VALUES(?,?,?,?)',(uuid.uuid4().hex,pid,now.isoformat(),json.dumps(dict(ok=True,reading=v,ratio=r,baseline=c['baseline']),ensure_ascii=False)))
@@ -137,7 +157,7 @@ class Monitor:
             self.fail(pid,error)
             with self.repo.db() as d:
                 d.execute('INSERT INTO api_monitor_history VALUES(?,?,?,?)',(uuid.uuid4().hex,pid,now.isoformat(),json.dumps(dict(ok=False,error=error),ensure_ascii=False)))
-                c=self.get(pid);c['last_day']=now.astimezone(TZ).date().isoformat();self.put(d,pid,c)
+                c=self.get(pid);finished=self.clock();c['last_day']=finished.astimezone(TZ).date().isoformat();c['last_check_at']=finished.isoformat();self.put(d,pid,c)
         await self.dispatch()
     async def dispatch(self):
         async with self.send_lock:
@@ -173,15 +193,15 @@ class Monitor:
         with self.repo.db() as d:status=d.execute('SELECT status FROM api_monitor_outbox WHERE id=?',(eid,)).fetchone()[0]
         return dict(message='测试消息已处理',status=status)
     async def tick(self):
-        now=self.clock();local=now.astimezone(TZ)
+        now=self.clock()
         for pid in PROVIDERS:
             c=self.get(pid)
             if not c['enabled']:continue
             last=c['last']
             if c['fault']:self.fail(pid,c['fault']['error'])
             elif last and (now-datetime.fromisoformat(last['at'])).total_seconds()>=93600:self.fail(pid,'超过 26 小时未成功读取，已有额度保留')
-            h,m=map(int,c['time'].split(':'))
-            if c['last_day']!=local.date().isoformat() and (c['last_day'] is None or (local.hour,local.minute)>=(h,m)):await self.start(pid,manual=False)
+            due,_=self.schedule(pid,c,now)
+            if due<=now:await self.start(pid,manual=False)
         await self.dispatch()
     async def loop(self):
         while True:
