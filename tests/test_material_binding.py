@@ -110,4 +110,3 @@ class BindingRouteProtectionTests(unittest.TestCase):
             finance=TestClient(create_app(root,role='finance'),base_url='http://127.0.0.1:8786')
             self.addCleanup(finance.close)
             self.assertEqual(finance.get('/api/materials/browser-binding').status_code,404)
-
