@@ -14,6 +14,7 @@ COUNT_KEYS = ('visited_rows','unique_videos','duplicate_occurrences','invalid_ro
 SAFE_DETAILS = {'cooldown_until','cooldown_seconds','visible_pages','source_page','source_index','missing_pages','state',
                 'expected_range','observed_range','observed_start','observed_end'}
 MESSAGES = {
+'BROWSER_BINDING_REQUIRED':'素材空间名称或浏览器身份已变化，请到“设置 → 浏览器空间”重新核验绑定。',
 'BROWSER_BUSY':'素材与客单价空间正在执行另一项采集，请稍后重试。',
 'BROWSER_CONTROL_UNAVAILABLE':'无法取得素材与客单价空间控制权，请检查已绑定的空间是否可用。',
 'PLUGIN_RESPONSE_TIMEOUT':'采集插件未及时返回页面结果，请检查 Kalodata 页面后重试。',

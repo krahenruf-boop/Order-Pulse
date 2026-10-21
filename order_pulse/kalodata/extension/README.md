@@ -4,7 +4,12 @@ This is the existing TikTok OPS 素材采集 MV3 extension, retained here so its
 fixes and backend version requirements can be maintained together. No new
 collector, extension identity, login, or browser profile is introduced.
 
-Current: **1.1.7 / 20261016.2**, protocol 2, adapter 2026-09-v2.
+Current: **1.1.8 / 20261021.1**, protocol 2, adapter 2026-09-v2.
+
+Existing product tabs navigate to the host's cleaned URL before extraction,
+discarding old date and category parameters even when the same product is open.
+Readiness checks the committed document URL as well as DOM readiness, so a
+previous document or a Chromium network-error page cannot count as loaded.
 
 Explicit extraction refreshes its product tab and reads details in inactive tabs.
 It never activates a source tab or navigates the Order Pulse workbench.

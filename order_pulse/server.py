@@ -144,6 +144,19 @@ def create_app(root=None, service=None, port=None, role=None):
         async def balance_preview(request:Request):return s.balance.preview(await request.json())
 
     if role=='materials':
+        @app.get('/api/materials/browser-binding')
+        async def materials_binding_get():return s.browser_space.state()
+
+        @app.get('/api/materials/browser-binding/candidates')
+        async def materials_binding_candidates():
+            from .integrations.material_binding import candidates
+            return await candidates()
+
+        @app.post('/api/materials/browser-binding/rebind')
+        async def materials_binding_rebind(request:Request):
+            from .integrations.material_binding import rebind
+            return await rebind(s,await request.json())
+
         @app.get('/api/kalodata/settings')
         async def kalodata_settings_get():return s.kalodata.settings()
 

@@ -29,6 +29,8 @@
 .kalodata-module button { min-height:38px; border:1px solid #d9e1ef; border-radius:7px; background:#fff; color:#334863; padding:9px 13px; font:inherit; font-size:13px; font-weight:500; cursor:pointer; }
 .kalodata-module button:hover:not(:disabled) { background:#f3f6ff; border-color:#a9baf0; }
 .kalodata-module button.kd-primary { background:#315ded; color:#fff; border-color:#315ded; }
+.kalodata-module button.kd-primary:hover:not(:disabled) { background:#244bdb; border-color:#244bdb; }
+.kalodata-module .kd-older-runs { margin-top:12px; }
 .kalodata-module button:disabled { opacity:.5; cursor:not-allowed; }
 .kalodata-module .kd-context { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 22px; margin:16px 0; padding:16px; background:#f6f8fc; border-radius:8px; }
 .kalodata-module .kd-context dt { font-size:12px; color:#6a7d98; margin:0 0 5px; }

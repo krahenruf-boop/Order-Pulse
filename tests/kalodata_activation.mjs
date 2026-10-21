@@ -7,21 +7,28 @@ const url='https://www.kalodata.com/product/detail?id=1&region=VN';
 const tabs=new Map([[10,{id:10,url,windowId:7}]]);
 const chrome={tabs:{
  query:async()=>[tabs.get(10)],
- update:async(id,options)=>{calls.push(['activate',id,options.active]);if(options.active)active=id;},
+ update:async(id,options)=>{calls.push(['update',id,options]);Object.assign(tabs.get(id),options);if(options.active)active=id;},
  reload:async id=>{calls.push(['reload',id]);},
  get:async id=>tabs.get(id),
  create:async options=>{calls.push(['create',options]);const tab={id:nextId++,windowId:7,...options};tabs.set(tab.id,tab);if(options.active)active=tab.id;return tab;},
  remove:async id=>{calls.push(['remove',id]);},
 },storage:{local:{set:async()=>{}}},scripting:{executeScript:async({target,world,args})=>{
  if(failDetail&&args?.[0]==='resolve_observed_link')throw Error('document closed');
- calls.push(['inject',target.tabId]);return [{result:world?{success:true,data:{bound:true}}:true}];
+ calls.push(['inject',target.tabId]);return [{result:world?{success:true,data:{bound:true}}:{href:tabs.get(target.tabId).url,ready:true}}];
 }}};
 const context=vm.createContext({chrome,URL,Date,setTimeout});
 vm.runInContext(source.slice(0,source.indexOf('chrome.runtime.onMessage')),context);
 await vm.runInContext('execute({operation:"bind_product",payload:{product_url:'+JSON.stringify(url)+'}},{})',context);
 assert.deepEqual(calls[0],['reload',10],'existing product refreshes in the background');
 assert.equal(calls.filter(x=>x[0]==='reload').length,1,'one refresh per user task, not an endless retry');
-assert.equal(calls.filter(x=>x[0]==='activate').length,0);assert.equal(active,99);
+assert.equal(calls.filter(x=>x[0]==='update').length,0);assert.equal(active,99);
+calls.length=0;
+tabs.get(10).url=url+'&dateRange=broken&cateValue=bad&language=zh-CN+';
+await vm.runInContext('execute({operation:"bind_product",payload:{product_url:'+JSON.stringify(url)+'}},{})',context);
+assert.deepEqual(JSON.parse(JSON.stringify(calls[0])),['update',10,{url}],'reused tab must discard stale dates and filters');
+assert.equal(calls.filter(x=>x[0]==='reload').length,0,'never refresh the broken old URL');
+assert.equal(active,99,'clean URL navigation stays in background');
+assert.equal(calls.filter(x=>x[0]==='update'&&x[2].active!==undefined).length,0);
 calls.length=0;
 await vm.runInContext('execute({operation:"bind_product",payload:{product_url:"https://www.kalodata.com/product/detail?id=2&region=VN"}},{})',context).catch(()=>{});
 assert.equal(calls[0][0],'create');assert.equal(calls[0][1].active,false);assert.equal(active,99);
@@ -37,3 +44,9 @@ for(const failure of [false,true]){
  assert.equal(active,99,'workbench stays in the foreground throughout extraction');
 }
 console.log('PASS background refresh, product creation, detail extraction and cleanup');
+// A committed browser error document (or the previous document) is not ready,
+// even if chrome.tabs.get still reports the intended product URL.
+vm.runInContext('let probeTime=0;Date={now:()=>probeTime+=6000};',context);
+chrome.scripting.executeScript=async()=>[{result:{href:'chrome-error://chromewebdata/',ready:true}}];
+await assert.rejects(vm.runInContext('loaded(10,'+JSON.stringify(url)+')',context),/PAGE_LOAD_TIMEOUT/);
+console.log('PASS wrong-document and browser-network-error readiness rejection');

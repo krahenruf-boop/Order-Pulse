@@ -76,6 +76,8 @@ class BrowserControl:
         try:
             state = await blocking(self.ensure, self.operations.get(), 'task')
             if state != 'CONTROLLED':
+                if state == 'BINDING_REQUIRED':
+                    raise KalodataError('BROWSER_BINDING_REQUIRED', 409, retryable=True)
                 raise KalodataError('BROWSER_CONTROL_UNAVAILABLE', 503, retryable=True)
             controlled = True
             yield

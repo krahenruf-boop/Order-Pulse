@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TikTok OPS 素材采集",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "minimum_chrome_version": "120",
   "description": "仅在用户主动提交任务后读取 Kalodata 页面已展示的视频原链接。",
   "permissions": ["storage", "scripting", "alarms"],

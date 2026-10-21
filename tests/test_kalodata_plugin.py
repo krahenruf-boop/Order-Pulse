@@ -284,7 +284,9 @@ class PluginJobTests(unittest.IsolatedAsyncioTestCase):
         root=Path(__file__).parents[1]
         for name in ('static/materials/kalodata-settings.js',):
             text=(root/name).read_text()
-            for old in ('ego lite','ownership','takeOver','Space','检查本机通道状态','WAITING_USER','/browser-binding'):self.assertNotIn(old,text)
+            for old in ('ego lite','ownership','takeOver','检查本机通道状态','WAITING_USER',"api('/browser-binding"):self.assertNotIn(old,text)
+            self.assertIn("api('/materials/browser-binding/rebind',selection)",text)
+            self.assertNotIn('/kalodata/browser-target',text)
         ui=(root/'static/materials/modules/kalodata/module.js').read_text()
         self.assertIn('打开 ego lite 当前采集浏览器',ui)
         self.assertIn('PLUGIN_RELOAD_REQUIRED',ui)

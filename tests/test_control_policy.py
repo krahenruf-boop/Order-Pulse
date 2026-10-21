@@ -83,7 +83,7 @@ class ControlManagerTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.control,'ensure',return_value='BINDING_REQUIRED'):
             with self.assertRaises(KalodataError) as exc:
                 async with self.control.operation():self.fail('must not run plugin')
-            self.assertEqual(exc.exception.code,'BROWSER_CONTROL_UNAVAILABLE')
+            self.assertEqual(exc.exception.code,'BROWSER_BINDING_REQUIRED')
         self.assertFalse(self.operations.lock.locked())
 
     async def test_cancel_during_mutex_wait_does_not_release_another_job_lock(self):

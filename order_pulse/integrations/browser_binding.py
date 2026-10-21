@@ -127,7 +127,9 @@ class OperationsSpaceBinding:
         required={'space_id','expected_name','profile_id','profile_name','purpose','auto_takeover','tabs'}
         if not isinstance(value,dict) or set(value)!=required:
             raise ValueError('素材与客单价空间绑定无效')
-        if type(value['space_id']) is not int or value['space_id']<0 or value['expected_name']!=OPERATIONS_SPACE_NAME or value['purpose']!=OPERATIONS_PURPOSE:
+        if (type(value['space_id']) is not int or value['space_id']<0 or
+            not isinstance(value['expected_name'],str) or not value['expected_name'].strip() or len(value['expected_name'])>150 or
+            value['purpose']!=OPERATIONS_PURPOSE):
             raise ValueError('素材与客单价空间身份不一致')
         for k in ('profile_id','profile_name'):
             if not isinstance(value[k],str) or not value[k] or len(value[k])>100:raise ValueError('浏览器身份无效')
@@ -170,6 +172,22 @@ class OperationsSpaceBinding:
                 bindings[OPERATIONS_PURPOSE]=recovered
                 db.execute('UPDATE settings SET value=? WHERE key=?',(json.dumps(bindings,ensure_ascii=False),KEY))
         return recovered
+
+    def replace_verified(self,expected,value):
+        """An explicit rebind may change the name, but never overwrite a new binding."""
+        clean=self.validate(value)
+        with self.repo.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT value FROM settings WHERE key=?',(KEY,)).fetchone()
+            bindings=json.loads(row[0]) if row else {}
+            if bindings.get(OPERATIONS_PURPOSE)!=expected:
+                raise ValueError('浏览器绑定已更改，请重新检查')
+            if (bindings.get(PURPOSE) or {}).get('space_id')==clean['space_id']:
+                raise ValueError('余额与素材客单价必须分开空间')
+            bindings[OPERATIONS_PURPOSE]=clean
+            db.execute('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                       (KEY,json.dumps(bindings,ensure_ascii=False)))
+        return clean
 
     def state(self):
         value=self.get()
