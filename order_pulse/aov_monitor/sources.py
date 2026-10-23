@@ -93,32 +93,9 @@ class DualSource:
             note=contract.get('note') or '待完成双来源金额、时区及退款覆盖核验；自动监控暂不可启用。',
             checked_at=contract.get('checked_at'),details=contract.get('details',[]))
     def resolve(self,shared,*,allow_login=True):
-        script='const s='+json.dumps(dict(shared,task_active=getattr(self._control,'active',False)))+''';
-const entries=await listTaskSpaces();
-const matches=entries.filter(e=>e.name===s.expected_name&&e.profileId===s.profile_id&&e.profileName===s.profile_name);
-const candidate=matches.length===1?matches[0]:null;
-const e=candidate&&(candidate.id===s.space_id||candidate.taskId===s.expected_name)?candidate:null;
-let browser;
-let result;
-if(!e)result={error:'BROWSER_BINDING_REQUIRED'};
-else {
- let task;
- if(e.ownership==='agent')task=await taskSpace(e.id);
- else if(s.task_active===true&&s.auto_takeover===true&&['user','agentDelegatedToUser'].includes(e.ownership)) {
-  try { task=e.ownership==='agentDelegatedToUser'?await takeOverTaskSpace(e.id):await claimTaskSpace(e.id);if(task.spaceId===e.id)console.log('AOV_CONTROL:claimed'); }
-  catch { result={error:'WAITING_USER'}; }
- } else result={error:'WAITING_USER'};
- if(!result&&task.spaceId!==e.id)result={error:'BROWSER_BINDING_REQUIRED'};
- if(!result) {
- browser={space_id:e.id,space_name:e.name,profile_id:e.profileId,profile_name:e.profileName};
- const all=await task.tabs(),tabs=all.filter(t=>t.url.startsWith('https://tms.mabangerp.com/#/myorder'));
- if(tabs.length!==1)result={error:all.some(t=>t.url.startsWith('https://tms.mabangerp.com/#/login'))?'AUTH_REQUIRED':'TMS_PAGE_REQUIRED'};
- else {const p=tabs[0].label?task.page(tabs[0].label):await task.adopt(tabs[0].page);result={space_id:e.id,page_label:p.label};}
- }
-}
-console.log('AOV_BINDING:'+JSON.stringify({...result,...(browser?{browser}:{})}));
-'''
-        try:p=subprocess.run([str(Path.home()/'.local/bin/ego-browser'),'nodejs'],input=script,text=True,capture_output=True,timeout=15)
+        active=getattr(self._control,'active',False)
+        script='const s='+json.dumps(dict(shared,task_active=active))+';\n'+Path(__file__).with_name('resolve_browser.js').read_text()
+        try:p=subprocess.run([str(Path.home()/'.local/bin/ego-browser'),'nodejs'],input=script,text=True,capture_output=True,timeout=45 if active else 15)
         except subprocess.TimeoutExpired as exc:
             self._remember_claim(exc.stdout,shared)
             raise ValueError('WAITING_CONNECTION') from None

@@ -50,8 +50,22 @@ export function aovRefundSummary(sample){
  if(sample.status!=='AVAILABLE')return '退款估算暂不可用：'+(sample.reason||'有效样本不足')+'。付款订单继续展示，退款未确认范围暂停异常和恢复推送。';
  return `退款影响估算：样本 ${sample.sample_shops} 家店、${sample.sample_orders} 单，全额退款占比 ${sample.order_pct}%，金额影响约 ${sample.amount_pct}%，客单价影响约 ${sample.aov_impact_pct}%。${sample.reused?'本轮复用样本，未读取退款页面。':'退款样本已更新。'}样本每24小时更新；并非随机抽样，估计不代表全店实际退款率。`;
 }
+export function aovInsights(result={}){
+ const timing=result?.timing,sample=result?.refund_estimation;
+ if(!timing&&!sample)return '';
+ const seconds=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0?`${esc(v)} 秒`:'未记录';
+ const icon=kind=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">${kind==='time'?'<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/>':'<path d="M5 9a7.5 7.5 0 1 1-1 7M5 4v5h5M9 12h6m-6 3h4"/>'}</svg>`;
+ const chevron='<svg class="aov-insight-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg>';
+ const total=timing?.active_seconds??timing?.collection_seconds;
+ const available=sample?.status==='AVAILABLE';
+ return `<section class="aov-insights" aria-label="检测摘要">
+ ${timing?`<details class="aov-insight aov-timing"><summary><span class="aov-insight-icon">${icon('time')}</span><span class="aov-insight-copy"><span class="aov-insight-title">本轮耗时</span><strong>${typeof total==='number'&&Number.isFinite(total)&&total>=0?`${Math.round(total)}<small>秒</small>`:'未记录'}</strong><span class="aov-insight-caption">不含等待登录与浏览器的时间</span></span>${chevron}</summary><div class="aov-insight-body"><dl class="aov-insight-metrics">${[['马帮订单',timing.by_source?.tms],['妙手订单',timing.by_source?.miaoshou],['妙手退款',timing.by_source?.refunds],['目录核对',timing.directory_seconds],['本地计算',timing.calculation_seconds]].map(([label,value])=>`<div><dt>${label}</dt><dd>${seconds(value)}</dd></div>`).join('')}</dl>${result.cache?'<p class="helper">复用本地订单，仅补充新增及缺失范围。</p>':''}</div></details>`:''}
+ ${sample?`<details class="aov-insight aov-refund-estimate"><summary><span class="aov-insight-icon">${icon('refund')}</span><span class="aov-insight-copy"><span class="aov-insight-title">退款影响估算</span><strong>${available?`${esc(sample.order_pct??'—')}<small>% <span>样本全退</span></small>`:'待更新'}</strong><span class="aov-insight-caption">${available?`${esc(sample.sample_shops??'—')} 家店 · ${esc(sample.sample_orders??'—')} 单样本 · 每24小时更新`:'有效样本不足，点击查看说明'}</span></span>${chevron}</summary><div class="aov-insight-body">${available?`<dl class="aov-insight-metrics"><div><dt>金额影响约</dt><dd>${esc(sample.amount_pct??'—')}%</dd></div><div><dt>客单价影响约</dt><dd>${esc(sample.aov_impact_pct??'—')}%</dd></div></dl>`:''}<p class="helper">${esc(aovRefundSummary(sample))}</p><dl class="aov-insight-dates"><div><dt>样本更新</dt><dd>${time(sample.observed_at)}</dd></div><div><dt>下次更新</dt><dd>${time(sample.next_refresh_at)}</dd></div></dl><p class="helper">部分退款保留原付款金额，已知全额退款直接剔除；通知会标注估算口径。</p></div></details>`:''}
+ </section>`;
+}
 export function aovSyncProgress(p,login={}){
- const waits={WAITING_USER:'浏览器正由你操作；空闲满 5 分钟后接回，也可点击“继续检测”立即接回',AUTH_REQUIRED:'马帮登录已过期，请完成登录并打开订单列表',TMS_PAGE_REQUIRED:'请在指定空间打开马帮订单列表',BROWSER_BINDING_REQUIRED:'浏览器空间绑定待核验',WAITING_CONNECTION:'浏览器连接暂不可用'};
+ const waits={WAITING_USER:'浏览器正由你操作；空闲满 5 分钟后接回，也可点击“继续检测”立即接回',AUTH_REQUIRED:'马帮登录已过期，请完成登录；检测时会自动准备订单页面',TMS_PAGE_REQUIRED:'正在自动准备马帮订单页面，就绪后继续检测',BROWSER_BINDING_REQUIRED:'浏览器空间绑定待核验',WAITING_CONNECTION:'浏览器连接暂不可用'};
+ if(p.phase==='TMS_PAGE_REQUIRED')return `${waits.TMS_PAGE_REQUIRED}；已完成数据保留。`;
  if(p.phase==='AUTH_REQUIRED'&&login.enabled)waits.AUTH_REQUIRED=(login.message||waits.AUTH_REQUIRED).replace(/[。；]+$/,'');
  if(waits[p.phase])return `${waits[p.phase]}；本轮已暂停，保留已完成数据。${p.waiting_since?'等待自 '+time(p.waiting_since)+'。':''}`;
  const minutes=Math.floor((p.collection_seconds||0)/60),seconds=(p.collection_seconds||0)%60;
@@ -78,8 +92,7 @@ export function createAovMonitor({api,toast}){
   <div class="aov-summary"><span class="status ${state.config.enabled?'success':''}"><i></i>${state.config.enabled?'自动监控已开启':'自动监控未开启'}</span><span>每 ${state.config.cycle_hours||2} 小时 · 北京时间整点 · 增量采集 · 24/72小时滚动统计</span><span>下次检测 ${time(state.next_at)}</span><span>全部店铺 ${state.config.shops.length} · 已匹配 ${Object.values(state.directory?.mapping||{}).filter(m=>m.status==='MATCHED').length} · 马帮统计 ${Object.values(state.directory?.mapping||{}).filter(m=>m.status==='TMS_ONLY').length}</span></div>
   ${state.busy?`<div class="notice aov-warning" role="status">${esc(aovSyncProgress(p,state.login))}</div>`:''}
   ${!historical&&aovSyncNotice(state)?`<div class="notice aov-warning" role="status">${esc(aovSyncNotice(state))}${state.latest?.progress?.failed&&['INCOMPLETE','PARTIAL'].includes(state.latest?.status)?'<button data-action="retry">重试未完成批次</button>':''}</div>`:''}
-  ${(historical||state.latest)?.timing?`<details class="aov-timing"><summary>本轮处理 ${Math.round((historical||state.latest).timing.active_seconds??(historical||state.latest).timing.collection_seconds)} 秒</summary><p class="helper">马帮订单 ${(historical||state.latest).timing.by_source.tms} 秒 · 妙手订单 ${(historical||state.latest).timing.by_source.miaoshou} 秒 · 妙手退款 ${(historical||state.latest).timing.by_source.refunds} 秒 · 目录核对 ${(historical||state.latest).timing.directory_seconds??'未记录'} 秒 · 本地计算 ${(historical||state.latest).timing.calculation_seconds??'未记录'} 秒。${(historical||state.latest).cache?'已复用本地订单覆盖；仅补新增和缺失范围。':''}等待登录或交还浏览器的时间不计入处理耗时。</p></details>`:''}
-  ${(historical||state.latest)?.refund_estimation?`<details class="aov-timing aov-refund-estimate"><summary>退款影响估算 · ${(historical||state.latest).refund_estimation.status==='AVAILABLE'?'样本全退 '+esc((historical||state.latest).refund_estimation.order_pct)+'%':'待更新'}</summary><p class="helper">${esc(aovRefundSummary((historical||state.latest).refund_estimation))}</p><p class="helper">样本更新 ${time((historical||state.latest).refund_estimation.observed_at)} · 下次更新 ${time((historical||state.latest).refund_estimation.next_refresh_at)}。部分退款按原口径保留付款金额；已知全退直接剔除。退款估算范围按付款订单客单价触发提醒，通知会标注估算口径。</p></details>`:''}
+  ${aovInsights(historical||state.latest)}
   ${historical?`<p class="helper">历史快照 · 截止 ${time(historical.cutoff)} · 不重新采集或换算</p>`:''}
   <section class="aov-controls"><div class="aov-toolbar"><div class="aov-windows">${Object.entries(windows).map(([k,v])=>`<button data-window="${k}" aria-pressed="${windowKey===k}" class="${windowKey===k?'primary':''}">${v}</button>`).join('')}</div><div class="actions">${historical?'<button data-action="latest">返回最近结果</button>':`<button data-action="hidden">隐藏店铺 (${hidden})</button>`}</div></div><div class="aov-search-row"><input type="search" data-card-search aria-label="搜索店铺或SKU" placeholder="搜索店铺、产品或 SKU" value="${esc(query)}"><button data-action="search">搜索</button><small>按店铺去重单量排序 · 对比前一个等长时段</small></div></section>
   <div class="aov-card-grid">${cards.map(card).join('')}</div>${!cards.length?'<div class="empty">没有匹配的店铺</div>':''}<p class="aov-footnote">整单人民币金额 ÷ 去重订单数。同产品多个 SKU 合并；混合产品订单分别进入相关产品组，不分摊金额。<br>店铺总单量独立去重；部分退款保留原付款金额。外币为 Wise 参考换算，告警仅按人民币判断。隐藏店铺或 SKU 仅影响展示，统计和既有推送规则不变。少于10单忽略异常。新订单与本地历史拼接为滚动24/72小时，再对比此前等长时段；移出窗口的数据保留为历史。</p>`;
@@ -93,7 +106,7 @@ export function createAovMonitor({api,toast}){
    if(b.dataset.action==='latest'){historical=null;render()}
    if(b.dataset.action==='search'){query=root.querySelector('[data-card-search]').value;render()}
    if(b.dataset.action==='retry'){b.disabled=true;await api('/aov-monitor/detect',{retry_id:state.latest.run_id});await load();toast('仅重试未完成批次，已成功批次继续保留。')}
-   if(b.dataset.action==='resume'){b.disabled=true;await api('/aov-monitor/resume',{});historical=null;await load();toast('继续未完成检测，完成后自动交还浏览器。')}
+   if(b.dataset.action==='resume'){b.disabled=true;await api('/aov-monitor/resume',{});historical=null;await load();toast('继续未完成检测，完成后返回工作台。')}
    if(b.dataset.action==='detect'){b.disabled=true;await api('/aov-monitor/detect',{});historical=null;await load();toast('增量同步已在后台开始；手动检测不会发送飞书。')}
   })};root.querySelector('[data-card-search]').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();query=e.target.value;render()}};
  }

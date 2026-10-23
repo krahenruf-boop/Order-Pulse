@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {aovCardDataLabel,aovSyncProgress,aovRefundSummary} from '../static/materials/aov-monitor.js';
+import {aovCardDataLabel,aovSyncProgress,aovRefundSummary,aovInsights} from '../static/materials/aov-monitor.js';
 assert.equal(aovCardDataLabel({status:'INCOMPLETE',updated_at:'2026-10-14T00:00:00Z',windows:{'24h':{}},errors:['AUTH_REQUIRED']}),'更新未完成');
 assert.equal(aovCardDataLabel({status:'INCOMPLETE',errors:['ORDER_FIELDS_UNVERIFIED']}),'字段待核验');
 assert.equal(aovCardDataLabel({status:'INCOMPLETE',errors:['SOURCE_NOT_READ']}),'采集未完成');
@@ -14,3 +14,16 @@ assert.equal(aovCardDataLabel({status:'COMPLETE',alert_eligible:false,diagnostic
 assert.match(aovRefundSummary({status:'UNAVAILABLE'}),/暂停异常和恢复推送/);
 assert.match(aovRefundSummary({status:'AVAILABLE',reused:true,sample_shops:12,sample_orders:2071,order_pct:'0.00',amount_pct:'0.00',aov_impact_pct:'0.00'}),/未读取退款页面.*不代表全店实际退款率/);
 console.log('refund estimate labels PASS');
+
+assert.equal(aovInsights(null),'');
+assert.doesNotMatch(aovSyncProgress({phase:'TMS_PAGE_REQUIRED'}),/请.*打开|已暂停/);
+assert.match(aovInsights({timing:{active_seconds:67.11,by_source:{tms:44.6}}}),/67<small>秒/);
+const unavailable=aovInsights({timing:{},refund_estimation:{status:'UNAVAILABLE',reason:'<script>bad</script>'}});
+assert.match(unavailable,/待更新/);
+assert.match(unavailable,/未记录/);
+assert.doesNotMatch(unavailable,/<script>|NaN|undefined|0\.00/);
+assert.match(unavailable,/&lt;script&gt;/);
+const available=aovInsights({refund_estimation:{status:'AVAILABLE',order_pct:'0.00',sample_shops:15,sample_orders:3280}});
+assert.match(available,/0\.00<small>%/);
+assert.match(available,/15 家店 · 3280 单样本/);
+console.log('insight summaries PASS');
