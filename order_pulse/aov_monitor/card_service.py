@@ -119,6 +119,8 @@ async def run_cards(monitor,rid,context):
     context.pop('waiting_since',None);context.pop('wait_error',None)
     try:
         if 'directory' not in context:
+            context['phase']='DIRECTORY'
+            store.context(rid,context)
             started=time.monotonic()
             directory=await browser_batch(monitor,monitor.source.directory)
             context['directory_seconds']=round(time.monotonic()-started,2)

@@ -65,6 +65,23 @@ class PausedMonitorTests(unittest.IsolatedAsyncioTestCase):
   self.assertIsNone(m.store.pending())
   await m.shutdown()
 
+ async def test_resume_clears_stale_login_notice_before_directory_read(self):
+  source=self.source();original=source.directory;phases=[]
+  m=Monitor(self.host,source=source,rates=SimpleNamespace(get=lambda *a:{}),clock=lambda:fixture.AT)
+  def directory():
+   context=m.store.pending()[1]
+   phases.append(context.get('phase'))
+   self.assertNotIn('waiting_since',context)
+   self.assertNotIn('wait_error',context)
+   return original()
+  source.directory=directory
+  rid=m.store.start(None,dict(card_run=True,cutoff=fixture.AT.isoformat(),start=(fixture.AT-fixture.timedelta(days=6)).isoformat(),phase='AUTH_REQUIRED',waiting_since=fixture.AT.isoformat(),wait_error='AUTH_REQUIRED'))
+  self.assertEqual((await m.resume())['run_id'],rid)
+  await m.worker
+  self.assertEqual(phases,['DIRECTORY'])
+  self.assertEqual(m.store.snapshot()['run_id'],rid)
+  self.assertIsNone(m.store.pending())
+
  async def test_idle_waits_two_hours_but_pending_tms_retries_after_twenty_seconds(self):
   m=Monitor(self.host,source=self.source(),clock=lambda:fixture.AT)
   self.assertEqual(m.scheduler_delay(),7200)
